@@ -36,20 +36,24 @@ analysis on $SYMBOL. Call chart_set_symbol first to load it, then follow
 these steps in order:
 1. chart_set_timeframe to "4h", then data_get_ohlcv, and identify the single
    most important key level (a major untested swing high/low or
-   support/resistance). Record its exact price.
+   support/resistance). Record its exact price, then call draw_shape with
+   type "line", color "white", label "4h Key Level", and that price.
 2. chart_set_timeframe to "1h", then data_get_ohlcv, and identify the most
    significant liquidity magnet near that key level (equal highs/lows, an
    obvious resting-stop zone). Record its exact price.
 3. chart_set_timeframe to "30m", then data_get_ohlcv, to confirm or refine
-   that liquidity magnet price.
+   that liquidity magnet price. Once finalized, call draw_shape with type
+   "line", color "yellow", label "Liquidity Magnet", and that price.
 4. chart_set_timeframe to "15m", then data_get_ohlcv, and determine: (a) has
    price swept through the liquidity magnet in recent candles -- if so
    record the EXACT price of that sweep (the wick extreme that took the
-   liquidity), and (b) if so, has an inversion Fair Value Gap formed after
-   that sweep (a FVG that price broke back through, flipping its role from
-   support to resistance or vice versa) -- if so record the EXACT low/high
-   boundaries of that FVG, and whether it has since been mitigated (price
-   has fully filled and closed beyond the zone).
+   liquidity) and call draw_shape with type "line", color "orange", label
+   "Liquidity Sweep", and that price; and (b) if a sweep occurred, has an
+   inversion Fair Value Gap formed after that sweep (a FVG that price broke
+   back through, flipping its role from support to resistance or vice
+   versa) -- if so record the EXACT low/high boundaries of that FVG, and
+   whether it has since been mitigated (price has fully filled and closed
+   beyond the zone).
 5. If an inversion FVG was found, call draw_shape with type "rectangle",
    priceHigh/priceLow set to the FVG boundaries, color red if it is a
    bearish inversion FVG, green if bullish, or gray if mitigated, and a
@@ -67,7 +71,8 @@ these steps in order:
    explain the setup is still forming.
 9. If signaling BUY or SELL, determine a realistic target price (the next
    significant liquidity/key level in the trade direction) and call
-   draw_shape with type "line", color blue, and that price.
+   draw_shape with type "line", color "blue", label "Target", and that
+   price.
 
 Respond with ONLY a single-line JSON object, no other text, no markdown
 fences, with these exact fields: {"signal": "BUY", "symbol": "...",

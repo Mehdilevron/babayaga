@@ -112,9 +112,13 @@ trades and is not financial advice. Verify any signal yourself.
 
    Then open `http://127.0.0.1:4488` once and leave the tab open. `chart.js`
    reconnects automatically and re-fetches a full snapshot (candles + any
-   drawn shapes) on every reconnect, so that tab will show each run's key
-   level / liquidity magnet / inversion FVG drawings as the background
-   server process is started and exits for each cron invocation.
+   drawn shapes) on every reconnect, so that tab will show each run's full
+   structure as the background server process is started and exits for
+   each cron invocation: the 4h key level (white line), the 1h/30m
+   liquidity magnet (yellow line), the 15m liquidity sweep point (orange
+   line), the inversion FVG zone (red/green/gray rectangle for
+   bearish/bullish/mitigated), and — once a BUY/SELL signal is confirmed —
+   the target price (blue line).
 
 2. Pick your own ntfy.sh topic name — don't reuse one from documentation,
    since anyone who knows a public topic name can read messages sent to it
