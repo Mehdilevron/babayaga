@@ -92,29 +92,29 @@ if [ $STATUS -ne 0 ] || [ -z "$RAW_OUTPUT" ]; then
   exit 0
 fi
 
-PARSED=$(echo "$RAW_OUTPUT" | python3 -c "
-import json, sys
+PARSED=$(RAW_OUTPUT="$RAW_OUTPUT" python3 -c '
+import json, os, sys
 try:
-    outer = json.load(sys.stdin)
-    text = outer.get('result', '')
-    start = text.find('{')
-    end = text.rfind('}')
+    outer = json.loads(os.environ["RAW_OUTPUT"])
+    text = outer.get("result", "")
+    start = text.find("{")
+    end = text.rfind("}")
     inner = json.loads(text[start:end+1])
     fields = [
-        str(inner.get('signal') or 'NONE'),
-        str(inner.get('symbol') or ''),
-        str(inner.get('sweep_price') if inner.get('sweep_price') is not None else ''),
-        str(inner.get('ifvg_zone') if inner.get('ifvg_zone') is not None else ''),
-        str(inner.get('ifvg_status') or ''),
-        str(inner.get('entry_confirmed') if inner.get('entry_confirmed') is not None else ''),
-        str(inner.get('entry_timeframe') or ''),
-        str(inner.get('target_price') if inner.get('target_price') is not None else ''),
-        str(inner.get('reason') or ''),
+        str(inner.get("signal") or "NONE"),
+        str(inner.get("symbol") or ""),
+        str(inner.get("sweep_price") if inner.get("sweep_price") is not None else ""),
+        str(inner.get("ifvg_zone") if inner.get("ifvg_zone") is not None else ""),
+        str(inner.get("ifvg_status") or ""),
+        str(inner.get("entry_confirmed") if inner.get("entry_confirmed") is not None else ""),
+        str(inner.get("entry_timeframe") or ""),
+        str(inner.get("target_price") if inner.get("target_price") is not None else ""),
+        str(inner.get("reason") or ""),
     ]
-    print('|'.join(fields))
+    print("|".join(fields))
 except Exception:
-    print('|'.join(['NONE','','','','','','','','parse-error']))
-")
+    print("|".join(["NONE","","","","","","","","parse-error"]))
+')
 
 IFS='|' read -r SIGNAL SYMBOL_OUT SWEEP_PRICE IFVG_ZONE IFVG_STATUS ENTRY_CONFIRMED ENTRY_TF TARGET_PRICE REASON <<< "$PARSED"
 
