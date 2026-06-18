@@ -127,5 +127,6 @@ echo "$(timestamp) signal=$SIGNAL symbol=$SYMBOL_OUT sweep=$SWEEP_PRICE ifvg=$IF
 
 if [ "$SIGNAL" = "BUY" ] || [ "$SIGNAL" = "SELL" ]; then
   MESSAGE=$(printf "Sweep: %s\nIFVG zone: %s (%s)\nEntry confirmed on: %s\nTarget: %s\n\n%s" "$SWEEP_PRICE" "$IFVG_ZONE" "$IFVG_STATUS" "$ENTRY_TF" "$TARGET_PRICE" "$REASON")
-  curl -s -H "Title: TradingView Signal: $SIGNAL $SYMBOL_OUT" -H "Priority: high" -H "Tags: warning" --data-binary "$MESSAGE" "https://ntfy.sh/$NTFY_TOPIC" > /dev/null
+  HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -H "Title: TradingView Signal: $SIGNAL $SYMBOL_OUT" -H "Priority: high" -H "Tags: warning" --data-binary "$MESSAGE" "https://ntfy.sh/$NTFY_TOPIC")
+  echo "$(timestamp) ntfy push to topic=$NTFY_TOPIC http_status=$HTTP_STATUS (200 means delivered to ntfy.sh -- check the phone app is subscribed to this exact topic)" >> "$LOG_FILE"
 fi
