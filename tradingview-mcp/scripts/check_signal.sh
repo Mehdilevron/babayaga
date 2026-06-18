@@ -125,6 +125,10 @@ IFS='|' read -r SIGNAL SYMBOL_OUT SWEEP_PRICE IFVG_ZONE IFVG_STATUS ENTRY_CONFIR
 
 echo "$(timestamp) signal=$SIGNAL symbol=$SYMBOL_OUT sweep=$SWEEP_PRICE ifvg=$IFVG_ZONE status=$IFVG_STATUS entry_confirmed=$ENTRY_CONFIRMED entry_tf=$ENTRY_TF target=$TARGET_PRICE reason=$REASON" >> "$LOG_FILE"
 
+if [ "$REASON" = "parse-error" ]; then
+  echo "$(timestamp) parse-error raw claude output (first 2000 chars): $(printf '%s' "$RAW_OUTPUT" | head -c 2000)" >> "$LOG_FILE"
+fi
+
 if [ "$SIGNAL" = "BUY" ] || [ "$SIGNAL" = "SELL" ]; then
   MESSAGE=$(printf "Sweep: %s\nIFVG zone: %s (%s)\nEntry confirmed on: %s\nTarget: %s\n\n%s" "$SWEEP_PRICE" "$IFVG_ZONE" "$IFVG_STATUS" "$ENTRY_TF" "$TARGET_PRICE" "$REASON")
   HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -H "Title: TradingView Signal: $SIGNAL $SYMBOL_OUT" -H "Priority: high" -H "Tags: warning" --data-binary "$MESSAGE" "https://ntfy.sh/$NTFY_TOPIC")
