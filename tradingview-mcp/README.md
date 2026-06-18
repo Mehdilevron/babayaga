@@ -99,12 +99,22 @@ trades and is not financial advice. Verify any signal yourself.
 
 ### One-time setup
 
-1. Register a *separate* MCP server entry for background use, with
-   `TRADINGVIEW_MCP_NO_OPEN=1` so each run doesn't pop a browser tab:
+1. Register a *separate* MCP server entry for background use. Use `-e` (not
+   a bare shell prefix — that only affects the `mcp add` command itself, not
+   future spawns) to persist `TRADINGVIEW_MCP_NO_OPEN=1` so each run doesn't
+   pop a browser tab, and a fixed `PORT` so you can leave one browser tab
+   open and watch it update on every run instead of getting a fresh random
+   port each time:
 
    ```bash
-   TRADINGVIEW_MCP_NO_OPEN=1 claude mcp add tradingview-bg -- node /absolute/path/to/tradingview-mcp/dist/server.js
+   claude mcp add tradingview-bg -e TRADINGVIEW_MCP_NO_OPEN=1 -e PORT=4488 -- node /absolute/path/to/tradingview-mcp/dist/server.js
    ```
+
+   Then open `http://127.0.0.1:4488` once and leave the tab open. `chart.js`
+   reconnects automatically and re-fetches a full snapshot (candles + any
+   drawn shapes) on every reconnect, so that tab will show each run's key
+   level / liquidity magnet / inversion FVG drawings as the background
+   server process is started and exits for each cron invocation.
 
 2. Pick your own ntfy.sh topic name — don't reuse one from documentation,
    since anyone who knows a public topic name can read messages sent to it
@@ -118,7 +128,8 @@ trades and is not financial advice. Verify any signal yourself.
    ./scripts/check_signal.sh
    ```
 
-   Check `scripts/signal_check.log` for the result.
+   Check `scripts/signal_check.log` for the result, and the browser tab from
+   step 1 for the drawn shapes.
 
 4. Schedule it, e.g. every 15 minutes via cron:
 
