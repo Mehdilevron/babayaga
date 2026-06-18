@@ -85,6 +85,62 @@ with no built-in trading-strategy semantics. If you want red/green/gray for
 bearish/bullish/mitigated zones, pick those colors yourself when calling the
 tool.
 
+## Automated alerts
+
+`scripts/check_signal.sh` runs a one-shot top-down ICT/Smart Money Concepts
+analysis (4h → 1h → 30m → 15m → 5m/1m) via the Claude Code CLI against this
+server's tools, and sends an [ntfy.sh](https://ntfy.sh) push notification
+when a BUY/SELL signal with confirmed lower-timeframe entry is found. It's
+meant to run periodically (cron/launchd/Task Scheduler) on a machine that
+has the `claude` CLI and this MCP server configured.
+
+This performs technical chart-pattern analysis only — it does not place
+trades and is not financial advice. Verify any signal yourself.
+
+### One-time setup
+
+1. Register a *separate* MCP server entry for background use, with
+   `TRADINGVIEW_MCP_NO_OPEN=1` so each run doesn't pop a browser tab:
+
+   ```bash
+   TRADINGVIEW_MCP_NO_OPEN=1 claude mcp add tradingview-bg -- node /absolute/path/to/tradingview-mcp/dist/server.js
+   ```
+
+2. Pick your own ntfy.sh topic name — don't reuse one from documentation,
+   since anyone who knows a public topic name can read messages sent to it
+   — and subscribe to it in the [ntfy app](https://ntfy.sh/app) or via
+   `ntfy subscribe <topic>`.
+
+3. Run it manually once to confirm it works:
+
+   ```bash
+   export NTFY_TOPIC=my-own-random-slug
+   ./scripts/check_signal.sh
+   ```
+
+   Check `scripts/signal_check.log` for the result.
+
+4. Schedule it, e.g. every 15 minutes via cron:
+
+   ```
+   */15 * * * * NTFY_TOPIC=my-own-random-slug /absolute/path/to/tradingview-mcp/scripts/check_signal.sh
+   ```
+
+### Environment variables
+
+| Variable | Purpose |
+| --- | --- |
+| `NTFY_TOPIC` | **Required.** Your own ntfy.sh topic name. |
+| `SYMBOL` | Symbol to analyze (default: `BTCUSDT`). |
+| `MCP_SERVER_NAME` | Name the background MCP server was registered under (default: `tradingview-bg`). |
+| `CLAUDE_BIN` | Path to the `claude` CLI (default: `claude`). |
+| `LOG_FILE` | Path to the log file (default: `scripts/signal_check.log` next to the script). |
+
+The script only finalizes a BUY/SELL signal once a 15m liquidity sweep, an
+active (non-mitigated) inversion FVG, and a lower-timeframe (5m or 1m) entry
+trigger all confirm it — otherwise it logs `signal=NONE` and exits without
+notifying.
+
 ## Architecture
 
 ```
