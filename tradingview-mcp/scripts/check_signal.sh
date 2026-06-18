@@ -51,7 +51,7 @@ these steps in order:
    boundaries of that FVG, and whether it has since been mitigated (price
    has fully filled and closed beyond the zone).
 5. If an inversion FVG was found, call draw_shape with type "rectangle",
-   priceHigh/priceLow set to the FVG boundaries, color red if it's a
+   priceHigh/priceLow set to the FVG boundaries, color red if it is a
    bearish inversion FVG, green if bullish, or gray if mitigated, and a
    short label.
 6. Only proceed toward a BUY/SELL signal if BOTH a liquidity sweep AND an
