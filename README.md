@@ -69,6 +69,16 @@ tradeoff for sub-second reaction time, not an oversight. Mitigations built in:
 - **Placeholder-key rejection**: `EvmWallet`/`SolanaWallet` refuse to load if
   given the literal placeholder strings from `.env.example`, so you can't
   accidentally go live with no real key configured.
+- **Optional per-pair supervisor (circuit breaker)**: `risk` limits apply
+  per-trade; `supervisor` (see `src/babayaga/core/supervisor.py`) watches a
+  pair's *own* recent quotes tick over tick and pauses just that pair - skips
+  it, doesn't trade - when its rolling volatility or either leg's bid/ask
+  spread blows out, auto-resuming after a few clean ticks. It's built only
+  from data the engine already fetches each tick; it has no external news
+  feed or LLM dependency, and it does not replace the kill switch above. It's
+  aimed at naturally gappier pairs like the gold cross-market hedge, where a
+  sudden move is more likely to mean "skip this until it settles" than
+  "execute immediately."
 
 None of this makes live trading risk-free. Start in dry-run, watch
 `trades.jsonl` for a while, and only fund a wallet with what you're prepared
@@ -130,6 +140,10 @@ round-trip, including dry-run ones) for auditing and PnL review.
 - **`risk.*`**: `min_profit_bps` (net profit floor to act on), `max_position_usd`
   (per-trade notional cap, used to clamp size down - never up), `max_daily_loss_usd`,
   `max_open_positions`, `slippage_bps` (added to estimated cost as a buffer).
+- **`supervisor.*`**: optional per-pair circuit breaker (off by default).
+  `enabled`, `pairs` (names to watch - pairs not listed are never paused),
+  `window_size` (ticks of mid-price history), `max_volatility_bps`,
+  `max_spread_bps`, `resume_after_clean_ticks`.
 - **`chains`**: one entry per EVM/Solana chain, naming the `.env` variable that
   holds its RPC URL.
 - **`venues`**: one entry per tradeable venue. `kind` is one of `evm_v2_router`,
@@ -151,6 +165,7 @@ python3 -m pytest tests/ -v
 
 Tests run against fake venue runtimes (no real RPC, wallet, or MT5
 connection) and cover the opportunity math, risk manager limits and kill
-switch, wallet key validation, config load/validation precedence, the
-factory's venue-wiring and fail-fast checks, and the engine's scan/detect/
-execute loop including both leg-failure paths.
+switch, the per-pair supervisor's pause/resume thresholds, wallet key
+validation, config load/validation precedence, the factory's venue-wiring and
+fail-fast checks, and the engine's scan/detect/execute loop including both
+leg-failure paths.

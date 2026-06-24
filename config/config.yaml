@@ -18,6 +18,20 @@ risk:
   max_open_positions: 3
   slippage_bps: 50 # max acceptable slippage per leg before an order is rejected
 
+# Optional per-pair circuit breaker, built only from each pair's own recent
+# quotes (no external news feed or LLM call) - see src/babayaga/core/supervisor.py.
+# Pauses a listed pair (skips it, doesn't trade) when its rolling volatility or
+# any leg's bid/ask spread blows out, and auto-resumes after a few clean ticks.
+# This does not replace the kill switch above; it's a softer, faster-resuming
+# brake meant for naturally gappier pairs like the gold cross-market hedge.
+supervisor:
+  enabled: true
+  pairs: ["GOLD_PAXG_XAUUSD"]
+  window_size: 20 # ticks of mid-price history used to estimate volatility
+  max_volatility_bps: 150.0 # pause if stddev of tick-to-tick returns exceeds this
+  max_spread_bps: 300.0 # pause if either leg's own spread exceeds this
+  resume_after_clean_ticks: 5
+
 chains:
   ethereum:
     rpc_env: ETHEREUM_RPC_URL

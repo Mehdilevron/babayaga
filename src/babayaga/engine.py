@@ -1,6 +1,7 @@
 """The scan -> detect -> risk-check -> execute loop.
 
-Each tick polls every configured pair's venues concurrently, hands any
+Each tick polls every configured pair's venues concurrently, runs the quotes
+past the optional per-pair PairSupervisor (core/supervisor.py), hands any
 detected opportunity to the RiskManager, and - if approved - fires the buy
 leg then the sell/hedge leg in sequence (never concurrently) so a failed
 second leg is always caught before it could go unnoticed.
@@ -25,6 +26,7 @@ from babayaga.config import PairConfig, Settings
 from babayaga.core.models import ArbOpportunity, Fill, Order, OrderStatus, Quote, Side, TradeRecord
 from babayaga.core.opportunity import find_best_opportunity
 from babayaga.core.risk import RiskManager
+from babayaga.core.supervisor import PairSupervisor
 from babayaga.factory import VenueRuntime, build_runtimes
 
 logger = logging.getLogger(__name__)
@@ -45,17 +47,19 @@ class Engine:
         runtimes: Dict[str, VenueRuntime],
         risk_manager: RiskManager,
         trades_log_path: Union[str, Path] = "trades.jsonl",
+        supervisor: Optional[PairSupervisor] = None,
     ):
         self.settings = settings
         self.runtimes = runtimes
         self.risk = risk_manager
         self.trades_log_path = Path(trades_log_path)
+        self.supervisor = supervisor or PairSupervisor(settings.supervisor)
 
     @classmethod
     def from_settings(cls, settings: Settings) -> "Engine":
         runtimes = build_runtimes(settings)
         risk_manager = RiskManager(settings.risk, kill_switch_path=settings.engine.kill_switch_file)
-        return cls(settings, runtimes, risk_manager)
+        return cls(settings, runtimes, risk_manager, supervisor=PairSupervisor(settings.supervisor))
 
     async def run(self, *, iterations: Optional[int] = None) -> None:
         mode = "DRY RUN" if self.settings.dry_run else "LIVE"
@@ -80,6 +84,11 @@ class Engine:
     async def process_pair(self, pair: PairConfig) -> None:
         quotes = await self._gather_quotes(pair)
         if quotes is None:
+            return
+
+        self.supervisor.record(pair.name, quotes)
+        if self.supervisor.is_paused(pair.name):
+            logger.debug("pair %s: supervisor paused (%s)", pair.name, self.supervisor.pause_reason(pair.name))
             return
 
         gas_cost_usd = sum(self.settings.venues[leg.venue].gas_cost_usd_estimate for leg in pair.legs)

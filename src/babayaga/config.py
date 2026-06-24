@@ -26,6 +26,18 @@ class RiskConfig(BaseModel):
     slippage_bps: float
 
 
+class SupervisorConfig(BaseModel):
+    """Optional per-pair circuit breaker built from the engine's own recent
+    quotes (no external news/LLM dependency) - see core/supervisor.py."""
+
+    enabled: bool = False
+    pairs: List[str] = []  # pair names to supervise; pairs not listed here are never paused
+    window_size: int = 20  # rolling number of ticks used to estimate volatility
+    max_volatility_bps: float = 150.0  # pause if stddev of tick-to-tick returns exceeds this
+    max_spread_bps: float = 300.0  # pause if any leg's own bid/ask spread exceeds this
+    resume_after_clean_ticks: int = 5  # consecutive in-bounds ticks required before auto-resuming
+
+
 class ChainConfig(BaseModel):
     rpc_env: str
     chain_id: Optional[int] = None
@@ -63,6 +75,7 @@ class Settings(BaseModel):
     dry_run: bool = True
     engine: EngineConfig = EngineConfig()
     risk: RiskConfig
+    supervisor: SupervisorConfig = SupervisorConfig()
     chains: Dict[str, ChainConfig] = {}
     venues: Dict[str, VenueConfig] = {}
     pairs: List[PairConfig]
