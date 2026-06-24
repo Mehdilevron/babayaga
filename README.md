@@ -123,6 +123,12 @@ babayaga --once
 # Live trading - requires DRY_RUN=false in .env AND dry_run: false in
 # config.yaml, plus the secrets for every venue you've configured:
 babayaga --live
+
+# Print live quotes/spreads for every pair each tick - never evaluates risk
+# or places an order, regardless of dry_run/live config. A smoke test for
+# whether your venues are quoting and whether real spreads ever clear your
+# profit floor, before trusting the bot to trade them:
+babayaga --quotes-only
 ```
 
 `--dry-run` forces dry-run regardless of config/env (handy for testing a

@@ -310,5 +310,50 @@ async def test_estimate_gas_cost_usd_falls_back_to_static_when_pricer_returns_no
     assert total == 13.0
 
 
+@pytest.mark.asyncio
+async def test_quotes_only_never_executes_even_when_profitable(tmp_path, capsys):
+    cheap = _quote("cheap", bid=99, ask=100)
+    rich = _quote("rich", bid=110, ask=111)
+    calls = []
+    runtimes = {
+        "cheap": _runtime("cheap", "evm_v2_router", cheap, calls=calls),
+        "rich": _runtime("rich", "evm_v2_router", rich, calls=calls),
+    }
+    venues = {"cheap": VenueConfig(kind="evm_v2_router"), "rich": VenueConfig(kind="evm_v2_router")}
+    settings = _settings([_two_leg_pair()], venues, dry_run=False)
+    risk = RiskManager(settings.risk, kill_switch_path=tmp_path / "kill_switch.flag")
+    engine = Engine(settings, runtimes, risk, trades_log_path=tmp_path / "trades.jsonl")
+
+    await engine.run_quotes_only(iterations=1)
+
+    assert calls == []  # quotes-only never places an order, even on a profitable spread
+    assert risk.state.open_positions == 0
+    assert not (tmp_path / "trades.jsonl").exists()
+    out = capsys.readouterr().out
+    assert "TEST" in out
+    assert "PROFITABLE" in out
+
+
+@pytest.mark.asyncio
+async def test_quotes_only_skips_pair_silently_on_quote_failure(tmp_path, capsys):
+    rich = _quote("rich", bid=110, ask=111)
+
+    async def _raise_quote(base, q, size_base, symbol=None):
+        raise RuntimeError("rpc down")
+
+    runtimes = {
+        "cheap": VenueRuntime(name="cheap", kind="evm_v2_router", get_quote=_raise_quote, place_order=None),
+        "rich": _runtime("rich", "evm_v2_router", rich),
+    }
+    venues = {"cheap": VenueConfig(kind="evm_v2_router"), "rich": VenueConfig(kind="evm_v2_router")}
+    settings = _settings([_two_leg_pair()], venues, dry_run=True)
+    risk = RiskManager(settings.risk, kill_switch_path=tmp_path / "kill_switch.flag")
+    engine = Engine(settings, runtimes, risk, trades_log_path=tmp_path / "trades.jsonl")
+
+    await engine.run_quotes_only(iterations=1)
+
+    assert "TEST" not in capsys.readouterr().out
+
+
 async def _const(value):
     return value

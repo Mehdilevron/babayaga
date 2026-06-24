@@ -142,6 +142,49 @@ class Engine:
 
         await self._execute(pair, opportunity)
 
+    async def run_quotes_only(self, *, iterations: Optional[int] = None) -> None:
+        """Print each pair's live quotes and net spread every tick, without
+        ever touching the risk manager or placing an order - a smoke test for
+        whether your configured venues/pairs are even quoting, and whether
+        real spreads ever clear your profit floor, before trusting the bot
+        to trade them."""
+        count = 0
+        while iterations is None or count < iterations:
+            for pair in self.settings.pairs:
+                try:
+                    await self._print_pair_quotes(pair)
+                except Exception:
+                    logger.exception("pair %s: unhandled error this tick", pair.name)
+            count += 1
+            if iterations is None or count < iterations:
+                await asyncio.sleep(self.settings.engine.poll_interval_ms / 1000)
+
+    async def _print_pair_quotes(self, pair: PairConfig) -> None:
+        quotes = await self._gather_quotes(pair)
+        if quotes is None:
+            return  # _gather_quotes already logged why
+
+        gas_cost_usd = await self._estimate_gas_cost_usd(pair)
+        opportunity = find_best_opportunity(
+            pair.name,
+            quotes,
+            pair.size_base,
+            gas_cost_usd=gas_cost_usd,
+            slippage_bps=self.settings.risk.slippage_bps,
+            is_hedge=pair.hedge,
+        )
+        if opportunity is None:
+            print(f"{pair.name}: not enough distinct venue quotes to compare")
+            return
+
+        verdict = "PROFITABLE" if opportunity.is_profitable else "below floor"
+        print(
+            f"{pair.name}: buy {opportunity.buy_quote.venue}@{opportunity.buy_quote.ask:.6f} -> "
+            f"sell {opportunity.sell_quote.venue}@{opportunity.sell_quote.bid:.6f} "
+            f"gross={opportunity.gross_spread_bps:+.1f}bps cost={opportunity.est_cost_bps:.1f}bps "
+            f"net={opportunity.net_profit_bps:+.1f}bps ({verdict})"
+        )
+
     async def _estimate_gas_cost_usd(self, pair: PairConfig) -> float:
         """Sum each leg's gas cost, preferring a venue's live oracle (see
         factory.py's _gas_pricer) over the static config estimate, with a
