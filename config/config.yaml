@@ -1,0 +1,127 @@
+# Strategy / risk configuration. No secrets here - those live in .env.
+#
+# IMPORTANT: the addresses below are well-known public mainnet contracts as of
+# this writing, included as a working starting point. Verify every address
+# against the official project docs/explorer before pointing real funds at
+# it - routers get upgraded and token contracts can change.
+
+dry_run: true # must be explicitly flipped to false (and DRY_RUN=false in .env) to place real orders
+
+engine:
+  poll_interval_ms: 750
+  kill_switch_file: "kill_switch.flag" # touch this file to halt the bot before the next loop tick
+
+risk:
+  min_profit_bps: 25 # net profit floor (after fees+gas+slippage) required to act, in basis points
+  max_position_usd: 250.0 # max notional per single arbitrage trade
+  max_daily_loss_usd: 200.0 # cumulative realized loss that trips the kill switch for the day
+  max_open_positions: 3
+  slippage_bps: 50 # max acceptable slippage per leg before an order is rejected
+
+chains:
+  ethereum:
+    rpc_env: ETHEREUM_RPC_URL
+    chain_id: 1
+    gas_limit_estimate: 180000
+  polygon:
+    rpc_env: POLYGON_RPC_URL
+    chain_id: 137
+    gas_limit_estimate: 180000
+  arbitrum:
+    rpc_env: ARBITRUM_RPC_URL
+    chain_id: 42161
+    gas_limit_estimate: 180000
+  solana:
+    rpc_env: SOLANA_RPC_URL
+
+venues:
+  uniswap_v2_eth:
+    kind: evm_v2_router
+    chain: ethereum
+    router_address: "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D"
+    fee_bps: 30
+    gas_cost_usd_estimate: 8.0 # ~180k gas at typical mainnet gas price; tune to current conditions
+  sushiswap_eth:
+    kind: evm_v2_router
+    chain: ethereum
+    router_address: "0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F"
+    fee_bps: 30
+    gas_cost_usd_estimate: 8.0
+  quickswap_polygon:
+    kind: evm_v2_router
+    chain: polygon
+    router_address: "0xa5E0829CaCEd8fFDD4De3c43696c57F7D7A678ff"
+    fee_bps: 30
+    gas_cost_usd_estimate: 0.05 # Polygon gas is cheap
+  uniswap_v3_ethereum:
+    kind: evm_v3_quoter
+    chain: ethereum
+    quoter_address: "0x61fFE014bA17989E743c5F6cB21bF9697530B21e"
+    router_address: "0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45" # SwapRouter02 - only needed for live execution, not quoting
+    fee_bps: 5
+    gas_cost_usd_estimate: 12.0 # V3 swaps run a bit hotter than V2
+  jupiter_solana_raydium:
+    kind: jupiter_aggregator
+    chain: solana
+    fee_bps: 0 # Jupiter bakes per-route fees into its quote dynamically
+    gas_cost_usd_estimate: 0.01 # Solana fees are near-negligible
+    dexes: "Raydium" # restrict routing to Raydium pools only
+  jupiter_solana_orca:
+    kind: jupiter_aggregator
+    chain: solana
+    fee_bps: 0
+    gas_cost_usd_estimate: 0.01
+    dexes: "Orca" # restrict routing to Orca pools only
+  mt5_hedge:
+    kind: mt5
+    fee_bps: 2 # approximate spread/commission floor; refined from the live bid/ask at runtime
+    gas_cost_usd_estimate: 0.0
+
+pairs:
+  - name: WETH_USDC_ETH_ARB
+    description: "Cross-DEX WETH/USDC arbitrage on Ethereum: Uniswap V2 vs Sushiswap"
+    base: WETH
+    quote: USDC
+    size_base: 0.05 # ~$100-200 notional at typical ETH prices; keeps a single trade under max_position_usd
+    legs:
+      - venue: uniswap_v2_eth
+      - venue: sushiswap_eth
+
+  - name: SOL_USDC_JUPITER
+    description: "Solana SOL/USDC via Jupiter, restricted to Raydium-only vs Orca-only routes so the two legs are genuinely different venues"
+    base: SOL
+    quote: USDC
+    size_base: 1.0 # ~$100-200 notional at typical SOL prices
+    legs:
+      - venue: jupiter_solana_raydium
+      - venue: jupiter_solana_orca
+
+  - name: GOLD_PAXG_XAUUSD
+    description: >
+      Cross-market hedge: PAXG (each token redeemable for ~1 troy oz of gold)
+      on Ethereum Uniswap V3 vs XAUUSD spot/CFD on MT5. When PAXG trades at a
+      discount/premium to XAUUSD beyond fees+spread, buy the cheap leg and
+      open the offsetting MT5 position to lock in the gap.
+    base: PAXG
+    quote: USDC # the on-chain leg actually quotes PAXG against USDC (there's no fiat-USD ERC20); treated as ~1 USD
+    hedge: true # second leg is an MT5 offsetting position, not a same-asset sale
+    size_base: 0.05 # ~$100-200 notional at typical gold prices (troy oz units)
+    legs:
+      - venue: uniswap_v3_ethereum
+      - venue: mt5_hedge
+        symbol: XAUUSD
+
+tokens:
+  ethereum:
+    WETH: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
+    USDC: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+    PAXG: "0x45804880De22913dAFE09f4980848ECE6EcbAf78"
+  polygon:
+    WMATIC: "0x0d500B1d8E8eF31E21C99d1Db9A6444d3ADf1270"
+    USDC: "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
+  arbitrum:
+    WETH: "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1"
+    USDC: "0xFF970A61A04b1cA14834A43f5dE4533eBDDB5CC8"
+  solana:
+    SOL: "So11111111111111111111111111111111111111112"
+    USDC: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"

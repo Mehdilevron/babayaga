@@ -1,0 +1,19 @@
+# Core (required for the engine, risk manager, and config to import)
+pyyaml>=6.0
+pydantic>=2.0
+python-dotenv>=1.0
+requests>=2.31
+
+# EVM chains (Ethereum / Polygon / Arbitrum DEX feeds + execution)
+web3>=6.15
+
+# Optional: Solana chain support (Raydium/Orca via Jupiter aggregator)
+# solders>=0.20
+# base58>=2.1
+
+# Optional: MetaTrader 5 hedge leg - Windows only, requires a running MT5 terminal
+# MetaTrader5>=5.0.45
+
+# Dev / test
+pytest>=8.0
+pytest-asyncio>=0.23

@@ -1,0 +1,17 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+build/
+dist/
+
+# Secrets - never commit real credentials
+.env
+*.local.yaml
+
+# Runtime artifacts
+logs/
+*.log
+trades.jsonl
+kill_switch.flag
