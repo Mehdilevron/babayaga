@@ -91,7 +91,7 @@ class Engine:
             logger.debug("pair %s: supervisor paused (%s)", pair.name, self.supervisor.pause_reason(pair.name))
             return
 
-        gas_cost_usd = sum(self.settings.venues[leg.venue].gas_cost_usd_estimate for leg in pair.legs)
+        gas_cost_usd = await self._estimate_gas_cost_usd(pair)
         opportunity = find_best_opportunity(
             pair.name,
             quotes,
@@ -141,6 +141,28 @@ class Engine:
         )
 
         await self._execute(pair, opportunity)
+
+    async def _estimate_gas_cost_usd(self, pair: PairConfig) -> float:
+        """Sum each leg's gas cost, preferring a venue's live oracle (see
+        factory.py's _gas_pricer) over the static config estimate, with a
+        per-leg fallback to that static value if the live lookup is absent,
+        raises, or returns None (e.g. a transient RPC error)."""
+        total = 0.0
+        for leg in pair.legs:
+            static_estimate = self.settings.venues[leg.venue].gas_cost_usd_estimate
+            live_estimate: Optional[float] = None
+            pricer = self.runtimes[leg.venue].estimate_gas_cost_usd
+            if pricer is not None:
+                try:
+                    live_estimate = await pricer()
+                except Exception:
+                    logger.exception(
+                        "pair %s: live gas estimate failed for venue %s, falling back to static estimate",
+                        pair.name,
+                        leg.venue,
+                    )
+            total += live_estimate if live_estimate is not None else static_estimate
+        return total
 
     async def _gather_quotes(self, pair: PairConfig) -> Optional[List[Quote]]:
         async def _quote_for(leg):

@@ -42,6 +42,11 @@ class ChainConfig(BaseModel):
     rpc_env: str
     chain_id: Optional[int] = None
     gas_limit_estimate: Optional[int] = None
+    # Both optional, and only used to price gas live instead of off the venue's
+    # static gas_cost_usd_estimate - see factory.py's gas pricer wiring. Leave
+    # unset to keep the static estimate (the previous, still-default, behavior).
+    native_token: Optional[str] = None  # wrapped native token symbol, e.g. "WETH"
+    native_price_venue: Optional[str] = None  # a venue (from `venues`) quoting native_token against a stablecoin
 
 
 class VenueConfig(BaseModel):
@@ -50,8 +55,9 @@ class VenueConfig(BaseModel):
     router_address: Optional[str] = None
     quoter_address: Optional[str] = None
     fee_bps: float = 0.0
-    gas_cost_usd_estimate: float = 0.0  # static estimate; revisit periodically as real gas prices drift
+    gas_cost_usd_estimate: float = 0.0  # static estimate; used as-is unless the chain has live gas pricing configured
     dexes: Optional[str] = None  # jupiter_aggregator only: restrict routing to this comma-separated DEX label list
+    stale_quote_after_s: Optional[float] = None  # mt5 only: treat an older tick as a closed/stale market (default 120s)
 
 
 class PairLeg(BaseModel):

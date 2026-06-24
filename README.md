@@ -145,11 +145,19 @@ round-trip, including dry-run ones) for auditing and PnL review.
   `window_size` (ticks of mid-price history), `max_volatility_bps`,
   `max_spread_bps`, `resume_after_clean_ticks`.
 - **`chains`**: one entry per EVM/Solana chain, naming the `.env` variable that
-  holds its RPC URL.
+  holds its RPC URL. Optionally set `native_token` (e.g. `WETH`) and
+  `native_price_venue` (an EVM venue already quoting that token against a
+  stablecoin) to price that chain's gas live - `gas_price * gas_limit_estimate`
+  converted to USD via that venue's own quote - instead of each venue's static
+  `gas_cost_usd_estimate`. Leave both unset to keep the static estimate; a
+  failed live lookup also falls back to it automatically.
 - **`venues`**: one entry per tradeable venue. `kind` is one of `evm_v2_router`,
   `evm_v3_quoter`, `jupiter_aggregator`, or `mt5`; the rest of the fields
   depend on `kind` (router/quoter address, fee, a static gas-cost-in-USD
-  estimate used in profit math, etc).
+  estimate used in profit math, etc). `stale_quote_after_s` (mt5 only) rejects
+  a tick older than this many seconds as a closed/stale market - paired with
+  the broker's own `trade_mode` flag, since MT5 has no direct "is the market
+  open" API.
 - **`pairs`**: each pair lists 2+ `legs` (each a `venue`, plus an optional MT5
   `symbol` like `XAUUSD`). Set `hedge: true` when the second leg is an
   offsetting MT5 position rather than a sale of the same asset.

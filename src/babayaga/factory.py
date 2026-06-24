@@ -10,6 +10,7 @@ when `settings.dry_run` is False - in dry-run mode we only ever read quotes.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Awaitable, Callable, Dict, Optional, Set
 
@@ -19,13 +20,21 @@ from babayaga.execution.evm_executor import EvmV2Executor, EvmV3Executor
 from babayaga.execution.mt5_executor import Mt5Executor
 from babayaga.execution.solana_executor import JupiterExecutor
 from babayaga.feeds.evm_dex import EvmV2DexFeed, EvmV3DexFeed
-from babayaga.feeds.mt5_feed import Mt5Feed, Mt5Session
+from babayaga.feeds.mt5_feed import DEFAULT_STALE_AFTER_S, Mt5Feed, Mt5Session
 from babayaga.feeds.solana_dex import JupiterDexFeed
 from babayaga.wallet.evm_wallet import EvmWallet
 from babayaga.wallet.solana_wallet import SolanaWallet
 
+logger = logging.getLogger(__name__)
+
 GetQuoteFn = Callable[[str, str, float, Optional[str]], Awaitable[Quote]]
 PlaceOrderFn = Callable[[Order, Optional[str]], Awaitable[Fill]]
+GasPricerFn = Callable[[], Awaitable[Optional[float]]]
+
+# Stablecoin every chain's `tokens` map is expected to carry, used to price a
+# chain's native gas token in USD via native_price_venue. Matches the existing
+# config.yaml convention - every chain section already has a USDC entry.
+GAS_PRICING_QUOTE_TOKEN = "USDC"
 
 
 @dataclass
@@ -34,6 +43,10 @@ class VenueRuntime:
     kind: str
     get_quote: GetQuoteFn
     place_order: PlaceOrderFn
+    # Live, per-tick gas-cost-in-USD estimate; None unless the venue's chain has
+    # native_token/native_price_venue configured (see config.py). When present,
+    # the engine prefers this over the venue's static gas_cost_usd_estimate.
+    estimate_gas_cost_usd: Optional[GasPricerFn] = None
 
 
 def _referenced_venues(settings: Settings) -> Set[str]:
@@ -64,6 +77,7 @@ class _RuntimeFactory:
         self._evm_wallet: Optional[EvmWallet] = None
         self._solana_wallet: Optional[SolanaWallet] = None
         self._mt5_session: Optional[Mt5Session] = None
+        self._gas_pricers: Dict[str, GasPricerFn] = {}
 
     def evm_wallet(self) -> EvmWallet:
         if self._evm_wallet is None:
@@ -90,6 +104,55 @@ class _RuntimeFactory:
             raise ValueError(f"chain {chain_name!r}: {chain.rpc_env} is not set - required to quote/trade on it")
         return url
 
+    def _gas_pricer(self, chain_name: str, gas_limit: int) -> Optional[GasPricerFn]:
+        """Build (and cache) a live USD gas-cost estimator for `chain_name`.
+
+        Returns None unless the chain config sets both `native_token` and
+        `native_price_venue` - the previous static `gas_cost_usd_estimate`
+        behavior is unchanged when either is left unset.
+        """
+        chain = self.settings.chains[chain_name]
+        if not (chain.native_token and chain.native_price_venue):
+            return None
+
+        if chain_name in self._gas_pricers:
+            return self._gas_pricers[chain_name]
+
+        price_venue_name = chain.native_price_venue
+        price_venue = self.settings.venues[price_venue_name]
+        rpc_url = self._rpc_url(chain_name)
+        tokens = self.settings.tokens.get(chain_name, {})
+
+        if price_venue.kind == "evm_v2_router":
+            if not price_venue.router_address:
+                raise ValueError(f"chain {chain_name!r}: native_price_venue {price_venue_name!r} has no router_address")
+            price_feed = EvmV2DexFeed(price_venue_name, rpc_url, price_venue.router_address, price_venue.fee_bps, tokens)
+        elif price_venue.kind == "evm_v3_quoter":
+            if not price_venue.quoter_address:
+                raise ValueError(f"chain {chain_name!r}: native_price_venue {price_venue_name!r} has no quoter_address")
+            price_feed = EvmV3DexFeed(price_venue_name, rpc_url, price_venue.quoter_address, price_venue.fee_bps, tokens)
+        else:
+            raise ValueError(
+                f"chain {chain_name!r}: native_price_venue {price_venue_name!r} must be an "
+                f"evm_v2_router or evm_v3_quoter venue, got {price_venue.kind!r}"
+            )
+
+        w3 = price_feed.w3
+        native_token = chain.native_token
+
+        async def _price() -> Optional[float]:
+            try:
+                gas_price_wei = w3.eth.gas_price
+                native_amount = gas_price_wei * gas_limit / 1e18
+                quote = await price_feed.get_quote(native_token, GAS_PRICING_QUOTE_TOKEN, 1.0)
+                return native_amount * quote.ask
+            except Exception:
+                logger.exception("chain %s: live gas price lookup failed", chain_name)
+                return None
+
+        self._gas_pricers[chain_name] = _price
+        return _price
+
     def build(self, venue_name: str) -> VenueRuntime:
         venue = self.settings.venues[venue_name]
         dry_run = self.settings.dry_run
@@ -98,6 +161,7 @@ class _RuntimeFactory:
             chain = self.settings.chains[venue.chain]
             rpc_url = self._rpc_url(venue.chain)
             tokens = self.settings.tokens.get(venue.chain, {})
+            gas_limit = chain.gas_limit_estimate or 200_000
             if not venue.router_address:
                 raise ValueError(f"venue {venue_name!r}: evm_v2_router requires router_address")
             feed = EvmV2DexFeed(venue_name, rpc_url, venue.router_address, venue.fee_bps, tokens)
@@ -110,14 +174,17 @@ class _RuntimeFactory:
                     tokens,
                     self.evm_wallet(),
                     chain.chain_id or 1,
-                    chain.gas_limit_estimate or 200_000,
+                    gas_limit,
                 )
-            return self._wrap_simple(venue_name, venue.kind, feed, executor)
+            runtime = self._wrap_simple(venue_name, venue.kind, feed, executor)
+            runtime.estimate_gas_cost_usd = self._gas_pricer(venue.chain, gas_limit)
+            return runtime
 
         if venue.kind == "evm_v3_quoter":
             chain = self.settings.chains[venue.chain]
             rpc_url = self._rpc_url(venue.chain)
             tokens = self.settings.tokens.get(venue.chain, {})
+            gas_limit = chain.gas_limit_estimate or 250_000
             if not venue.quoter_address:
                 raise ValueError(f"venue {venue_name!r}: evm_v3_quoter requires quoter_address")
             feed = EvmV3DexFeed(venue_name, rpc_url, venue.quoter_address, venue.fee_bps, tokens)
@@ -135,9 +202,11 @@ class _RuntimeFactory:
                     tokens,
                     self.evm_wallet(),
                     chain.chain_id or 1,
-                    chain.gas_limit_estimate or 250_000,
+                    gas_limit,
                 )
-            return self._wrap_simple(venue_name, venue.kind, feed, executor)
+            runtime = self._wrap_simple(venue_name, venue.kind, feed, executor)
+            runtime.estimate_gas_cost_usd = self._gas_pricer(venue.chain, gas_limit)
+            return runtime
 
         if venue.kind == "jupiter_aggregator":
             tokens = self.settings.tokens.get("solana", {})
@@ -164,7 +233,8 @@ class _RuntimeFactory:
 
         if venue.kind == "mt5":
             session = self.mt5_session()
-            feed = Mt5Feed(venue_name, venue.fee_bps, session)
+            stale_after_s = venue.stale_quote_after_s if venue.stale_quote_after_s is not None else DEFAULT_STALE_AFTER_S
+            feed = Mt5Feed(venue_name, venue.fee_bps, session, stale_after_s=stale_after_s)
             executor = Mt5Executor(venue_name, session) if not dry_run else None
             return self._wrap_mt5(venue_name, venue.kind, feed, executor)
 

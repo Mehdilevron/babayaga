@@ -4,6 +4,10 @@ real RPC, wallet, or MT5 terminal."""
 
 from __future__ import annotations
 
+import sys
+import time
+import types
+
 import pytest
 
 from babayaga.config import ChainConfig, PairConfig, PairLeg, RiskConfig, Settings, VenueConfig
@@ -158,3 +162,64 @@ async def test_mt5_runtime_requires_symbol_for_order():
 
     with pytest.raises(ValueError, match="symbol"):
         await runtimes["v"].place_order(_order("v"), None)
+
+
+def test_no_live_gas_pricing_without_chain_native_token_config():
+    venues = {"v": VenueConfig(kind="evm_v2_router", chain="eth", router_address=ROUTER_ADDRESS)}
+    chains = {"eth": ChainConfig(rpc_env="ETH_RPC")}  # native_token/native_price_venue unset
+    pairs = [PairConfig(name="P", base="WETH", quote="USDC", legs=[PairLeg(venue="v")])]
+    settings = _settings(venues=venues, pairs=pairs, chains=chains, rpc_urls={"ETH_RPC": "http://localhost:1"})
+
+    runtimes = build_runtimes(settings)
+
+    assert runtimes["v"].estimate_gas_cost_usd is None
+
+
+def test_live_gas_pricer_attached_when_chain_configures_native_token_and_price_venue():
+    venues = {
+        "v": VenueConfig(kind="evm_v2_router", chain="eth", router_address=ROUTER_ADDRESS),
+        "pricer": VenueConfig(kind="evm_v2_router", chain="eth", router_address=ROUTER_ADDRESS),
+    }
+    chains = {"eth": ChainConfig(rpc_env="ETH_RPC", native_token="WETH", native_price_venue="pricer")}
+    pairs = [PairConfig(name="P", base="WETH", quote="USDC", legs=[PairLeg(venue="v")])]
+    settings = _settings(venues=venues, pairs=pairs, chains=chains, rpc_urls={"ETH_RPC": "http://localhost:1"})
+
+    runtimes = build_runtimes(settings)
+
+    assert callable(runtimes["v"].estimate_gas_cost_usd)
+    # "pricer" itself isn't referenced by any pair leg, so it must not be built
+    assert "pricer" not in runtimes
+
+
+def test_native_price_venue_must_be_an_evm_quoting_venue():
+    venues = {
+        "v": VenueConfig(kind="evm_v2_router", chain="eth", router_address=ROUTER_ADDRESS),
+        "pricer": VenueConfig(kind="jupiter_aggregator"),
+    }
+    chains = {"eth": ChainConfig(rpc_env="ETH_RPC", native_token="WETH", native_price_venue="pricer")}
+    pairs = [PairConfig(name="P", base="WETH", quote="USDC", legs=[PairLeg(venue="v")])]
+    settings = _settings(venues=venues, pairs=pairs, chains=chains, rpc_urls={"ETH_RPC": "http://localhost:1"})
+
+    with pytest.raises(ValueError, match="evm_v2_router or evm_v3_quoter"):
+        build_runtimes(settings)
+
+
+@pytest.mark.asyncio
+async def test_mt5_venue_honors_configured_stale_quote_after_s(monkeypatch):
+    module = types.ModuleType("MetaTrader5")
+    module.SYMBOL_TRADE_MODE_DISABLED = 0
+    module.initialize = lambda **kwargs: True
+    module.symbol_select = lambda symbol, enable: True
+    module.symbol_info = lambda symbol: types.SimpleNamespace(trade_mode=1)
+    module.symbol_info_tick = lambda symbol: types.SimpleNamespace(bid=100.0, ask=100.5, time=time.time() - 10)
+    module.last_error = lambda: (0, "no error")
+    monkeypatch.setitem(sys.modules, "MetaTrader5", module)
+
+    venues = {"v": VenueConfig(kind="mt5", stale_quote_after_s=5.0)}  # tighter than the 10s-old tick above
+    pairs = [PairConfig(name="P", base="PAXG", quote="USDC", legs=[PairLeg(venue="v", symbol="XAUUSD")])]
+    settings = _settings(venues=venues, pairs=pairs, dry_run=True, mt5_login=1, mt5_password="pw", mt5_server="srv")
+
+    runtimes = build_runtimes(settings)
+
+    with pytest.raises(RuntimeError, match="stale"):
+        await runtimes["v"].get_quote("PAXG", "USDC", 1.0, "XAUUSD")

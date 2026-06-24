@@ -18,7 +18,7 @@ def _quote(venue, bid, ask, base="WETH", quote="USDC", fee_bps=0.0):
     return Quote(venue=venue, base=base, quote=quote, bid=bid, ask=ask, fee_bps=fee_bps)
 
 
-def _runtime(name, kind, quote, *, order_error=None, calls=None):
+def _runtime(name, kind, quote, *, order_error=None, calls=None, gas_pricer=None):
     async def get_quote(base, q, size_base, symbol=None):
         return quote
 
@@ -29,7 +29,9 @@ def _runtime(name, kind, quote, *, order_error=None, calls=None):
             raise order_error
         return Fill(order=order, filled_size_base=order.size_base, avg_price=order.limit_price, fee_paid_usd=0.0)
 
-    return VenueRuntime(name=name, kind=kind, get_quote=get_quote, place_order=place_order)
+    return VenueRuntime(
+        name=name, kind=kind, get_quote=get_quote, place_order=place_order, estimate_gas_cost_usd=gas_pricer
+    )
 
 
 def _settings(pairs, venues, *, dry_run, risk=None):
@@ -239,3 +241,74 @@ async def test_hedge_leg_mirrors_dex_side_when_mt5_is_the_buy_leg(tmp_path):
     # natural BUY.
     assert by_venue["dex"].side.value == "sell"
     assert by_venue["mt5_hedge"].side.value == "sell"
+
+
+@pytest.mark.asyncio
+async def test_estimate_gas_cost_usd_prefers_live_pricer_over_static(tmp_path):
+    cheap = _quote("cheap", bid=99, ask=100)
+    rich = _quote("rich", bid=110, ask=111)
+    runtimes = {
+        "cheap": _runtime("cheap", "evm_v2_router", cheap, gas_pricer=lambda: _const(1.0)),
+        "rich": _runtime("rich", "evm_v2_router", rich, gas_pricer=lambda: _const(2.0)),
+    }
+    venues = {
+        "cheap": VenueConfig(kind="evm_v2_router", gas_cost_usd_estimate=100.0),
+        "rich": VenueConfig(kind="evm_v2_router", gas_cost_usd_estimate=100.0),
+    }
+    settings = _settings([_two_leg_pair()], venues, dry_run=True)
+    risk = RiskManager(settings.risk, kill_switch_path=tmp_path / "kill_switch.flag")
+    engine = Engine(settings, runtimes, risk, trades_log_path=tmp_path / "trades.jsonl")
+
+    total = await engine._estimate_gas_cost_usd(settings.pairs[0])
+
+    assert total == 3.0  # live 1.0 + 2.0, not the static 100.0 + 100.0
+
+
+@pytest.mark.asyncio
+async def test_estimate_gas_cost_usd_falls_back_to_static_when_pricer_raises(tmp_path):
+    cheap = _quote("cheap", bid=99, ask=100)
+    rich = _quote("rich", bid=110, ask=111)
+
+    async def _boom():
+        raise RuntimeError("rpc down")
+
+    runtimes = {
+        "cheap": _runtime("cheap", "evm_v2_router", cheap, gas_pricer=_boom),
+        "rich": _runtime("rich", "evm_v2_router", rich),  # no pricer at all
+    }
+    venues = {
+        "cheap": VenueConfig(kind="evm_v2_router", gas_cost_usd_estimate=5.0),
+        "rich": VenueConfig(kind="evm_v2_router", gas_cost_usd_estimate=8.0),
+    }
+    settings = _settings([_two_leg_pair()], venues, dry_run=True)
+    risk = RiskManager(settings.risk, kill_switch_path=tmp_path / "kill_switch.flag")
+    engine = Engine(settings, runtimes, risk, trades_log_path=tmp_path / "trades.jsonl")
+
+    total = await engine._estimate_gas_cost_usd(settings.pairs[0])
+
+    assert total == 13.0  # both fall back to their static estimates
+
+
+@pytest.mark.asyncio
+async def test_estimate_gas_cost_usd_falls_back_to_static_when_pricer_returns_none(tmp_path):
+    cheap = _quote("cheap", bid=99, ask=100)
+    rich = _quote("rich", bid=110, ask=111)
+    runtimes = {
+        "cheap": _runtime("cheap", "evm_v2_router", cheap, gas_pricer=lambda: _const(None)),
+        "rich": _runtime("rich", "evm_v2_router", rich),
+    }
+    venues = {
+        "cheap": VenueConfig(kind="evm_v2_router", gas_cost_usd_estimate=5.0),
+        "rich": VenueConfig(kind="evm_v2_router", gas_cost_usd_estimate=8.0),
+    }
+    settings = _settings([_two_leg_pair()], venues, dry_run=True)
+    risk = RiskManager(settings.risk, kill_switch_path=tmp_path / "kill_switch.flag")
+    engine = Engine(settings, runtimes, risk, trades_log_path=tmp_path / "trades.jsonl")
+
+    total = await engine._estimate_gas_cost_usd(settings.pairs[0])
+
+    assert total == 13.0
+
+
+async def _const(value):
+    return value

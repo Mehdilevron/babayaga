@@ -37,6 +37,12 @@ chains:
     rpc_env: ETHEREUM_RPC_URL
     chain_id: 1
     gas_limit_estimate: 180000
+    # Price gas live (gas_price * gas_limit_estimate, converted to USD via
+    # uniswap_v2_eth's own WETH/USDC quote) instead of the static
+    # gas_cost_usd_estimate below. Falls back to that static value if this
+    # lookup ever fails. Remove both lines to go back to the static estimate.
+    native_token: WETH
+    native_price_venue: uniswap_v2_eth
   polygon:
     rpc_env: POLYGON_RPC_URL
     chain_id: 137
@@ -90,6 +96,7 @@ venues:
     kind: mt5
     fee_bps: 2 # approximate spread/commission floor; refined from the live bid/ask at runtime
     gas_cost_usd_estimate: 0.0
+    stale_quote_after_s: 120 # reject a tick older than this as a closed/stale market; omit to keep this default
 
 pairs:
   - name: WETH_USDC_ETH_ARB
