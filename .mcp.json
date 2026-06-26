@@ -10,6 +10,13 @@
         "N8N_API_URL": "${N8N_API_URL}",
         "N8N_API_KEY": "${N8N_API_KEY}"
       }
+    },
+    "n8n-instance": {
+      "type": "http",
+      "url": "${N8N_MCP_URL}",
+      "headers": {
+        "Authorization": "Bearer ${N8N_MCP_TOKEN}"
+      }
     }
   }
 }
