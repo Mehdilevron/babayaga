@@ -9,6 +9,8 @@ from babayaga.integration.oanda import (
     OandaClient,
     OandaError,
     OandaFeed,
+    OandaStreamFeed,
+    _BarAggregator,
     from_oanda_symbol,
     to_oanda_symbol,
     _rfc3339_to_epoch,
@@ -19,8 +21,9 @@ from babayaga.kernel.events import Order, Side
 class FakeClient:
     """Stands in for OandaClient; returns canned responses, records calls."""
 
-    def __init__(self, responses):
+    def __init__(self, responses, price_stream=None):
         self._responses = responses
+        self._price_stream = price_stream or []
         self.calls = []
         self.practice = True
         self.account_id = "101-000-TEST"
@@ -31,6 +34,19 @@ class FakeClient:
             if matcher in path:
                 return resp(body) if callable(resp) else resp
         return {}
+
+    def stream_prices(self, instruments):
+        yield from self._price_stream
+
+
+def _price(ts, bid, ask):
+    return {
+        "type": "PRICE",
+        "instrument": "EUR_USD",
+        "time": ts,
+        "bids": [{"price": str(bid)}],
+        "asks": [{"price": str(ask)}],
+    }
 
 
 def test_symbol_conversion_roundtrip():
@@ -76,6 +92,46 @@ def test_feed_parses_candles():
     assert got[0].symbol == "EUR/USD"
     assert got[0].close == 1.1005
     assert got[1].high == 1.1020
+
+
+def test_bar_aggregator_rolls_over_on_boundary():
+    agg = _BarAggregator("EUR/USD", bar_seconds=60)
+    assert agg.add(0.0, 1.10) is None       # opens bar [0,60)
+    assert agg.add(30.0, 1.12) is None       # same bar, new high
+    assert agg.add(45.0, 1.09) is None       # same bar, new low
+    done = agg.add(61.0, 1.11)               # first tick of next bar -> emit
+    assert done is not None
+    assert done.open == 1.10
+    assert done.high == 1.12
+    assert done.low == 1.09
+    assert done.close == 1.09
+    assert done.volume == 3                   # three ticks in the completed bar
+
+
+def test_stream_feed_builds_candles_from_ticks():
+    ticks = [
+        {"type": "HEARTBEAT", "time": "2024-01-01T00:00:00.000000000Z"},
+        _price("2024-01-01T00:00:10.000000000Z", 1.1000, 1.1002),  # mid 1.1001
+        _price("2024-01-01T00:00:40.000000000Z", 1.1010, 1.1012),  # mid 1.1011
+        _price("2024-01-01T00:01:05.000000000Z", 1.1020, 1.1022),  # next bar
+        _price("2024-01-01T00:02:05.000000000Z", 1.1030, 1.1032),  # next bar
+    ]
+    client = FakeClient([], price_stream=ticks)
+    feed = OandaStreamFeed(client, "EUR/USD", bar_seconds=60)
+
+    async def collect():
+        out = []
+        async for c in feed.stream():
+            out.append(c)
+        return out
+
+    candles = asyncio.run(collect())
+    # Two completed bars emitted mid-stream + a final flushed partial bar.
+    assert len(candles) == 3
+    assert candles[0].open == 1.1001
+    assert candles[0].close == 1.1011
+    assert candles[0].high == 1.1011
+    assert candles[0].volume == 2  # two ticks in the first minute
 
 
 def test_broker_refuses_live_without_confirmation():

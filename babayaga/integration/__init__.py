@@ -15,7 +15,12 @@ from babayaga.integration.market_data import (
 )
 
 if TYPE_CHECKING:  # for type checkers / IDEs only
-    from babayaga.integration.oanda import OandaBroker, OandaClient, OandaFeed
+    from babayaga.integration.oanda import (
+        OandaBroker,
+        OandaClient,
+        OandaFeed,
+        OandaStreamFeed,
+    )
 
 __all__ = [
     "MarketDataFeed",
@@ -26,12 +31,13 @@ __all__ = [
     "Position",
     "OandaClient",
     "OandaFeed",
+    "OandaStreamFeed",
     "OandaBroker",
 ]
 
 
 def __getattr__(name: str):
-    if name in {"OandaClient", "OandaFeed", "OandaBroker"}:
+    if name in {"OandaClient", "OandaFeed", "OandaStreamFeed", "OandaBroker"}:
         from babayaga.integration import oanda
 
         return getattr(oanda, name)

@@ -126,13 +126,20 @@ export OANDA_ACCOUNT_ID=101-...
 ```python
 import asyncio
 from babayaga import Config, TradingOS
-from babayaga.integration.oanda import OandaClient, OandaFeed, OandaBroker
+from babayaga.integration.oanda import (
+    OandaClient, OandaFeed, OandaStreamFeed, OandaBroker,
+)
 
 client = OandaClient.from_env()                 # practice by default
 os_ = TradingOS(Config(symbols=("EUR/USD",), sim_steps=0))
 os_.broker = OandaBroker(client)                # demo broker (virtual money)
 os_.execution.broker = os_.broker
-os_.attach_feed("EUR/USD", OandaFeed(client, "EUR/USD", granularity="M1"))
+
+# Two data options:
+#   OandaFeed        — polls completed candles (simple, low frequency)
+#   OandaStreamFeed  — holds the pricing STREAM open and aggregates live
+#                      bid/ask ticks into bars in real time
+os_.attach_feed("EUR/USD", OandaStreamFeed(client, "EUR/USD", bar_seconds=60))
 asyncio.run(os_.run())
 ```
 

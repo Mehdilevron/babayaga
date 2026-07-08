@@ -29,10 +29,13 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import os
+import queue
+import threading
 import urllib.error
 import urllib.request
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
 from typing import Any
 
 from babayaga.integration.broker import Broker, Position
@@ -41,6 +44,8 @@ from babayaga.kernel.events import Candle, Fill, Order, Side
 
 PRACTICE_HOST = "https://api-fxpractice.oanda.com"
 LIVE_HOST = "https://api-fxtrade.oanda.com"
+PRACTICE_STREAM_HOST = "https://stream-fxpractice.oanda.com"
+LIVE_STREAM_HOST = "https://stream-fxtrade.oanda.com"
 
 
 class OandaError(RuntimeError):
@@ -73,6 +78,7 @@ class OandaClient:
         self.practice = practice
         self.timeout = timeout
         self.base = PRACTICE_HOST if practice else LIVE_HOST
+        self.stream_base = PRACTICE_STREAM_HOST if practice else LIVE_STREAM_HOST
 
     @classmethod
     def from_env(cls, practice: bool = True) -> "OandaClient":
@@ -96,6 +102,29 @@ class OandaClient:
             raise OandaError(f"OANDA {method} {path} -> HTTP {e.code}: {detail}") from e
         except urllib.error.URLError as e:  # pragma: no cover - network path
             raise OandaError(f"OANDA request failed: {e.reason}") from e
+
+    def stream_prices(self, instruments: str) -> Iterator[dict]:
+        """Yield newline-delimited JSON objects from OANDA's pricing stream.
+
+        This is a *blocking* generator (one HTTP connection held open). The
+        async :class:`OandaStreamFeed` runs it on a background thread. Yields
+        both ``PRICE`` and ``HEARTBEAT`` messages so callers can keep-alive.
+        """
+        path = f"/v3/accounts/{self.account_id}/pricing/stream?instruments={instruments}"
+        url = f"{self.stream_base}{path}"
+        req = urllib.request.Request(url, method="GET")
+        req.add_header("Authorization", f"Bearer {self.token}")
+        try:
+            with urllib.request.urlopen(req) as resp:  # noqa: S310  # pragma: no cover - network
+                for raw in resp:
+                    line = raw.decode(errors="replace").strip()
+                    if line:
+                        yield json.loads(line)
+        except urllib.error.HTTPError as e:  # pragma: no cover - network path
+            detail = e.read().decode(errors="replace")
+            raise OandaError(f"OANDA stream -> HTTP {e.code}: {detail}") from e
+        except urllib.error.URLError as e:  # pragma: no cover - network path
+            raise OandaError(f"OANDA stream failed: {e.reason}") from e
 
 
 class OandaFeed(MarketDataFeed):
@@ -162,6 +191,126 @@ class OandaFeed(MarketDataFeed):
                     continue
                 yield self._to_candle(raw)
                 last_time = raw.get("time")
+                emitted += 1
+                if self.max_bars and emitted >= self.max_bars:
+                    return
+
+
+class _BarAggregator:
+    """Aggregates streamed price ticks into fixed-duration OHLC candles."""
+
+    def __init__(self, symbol: str, bar_seconds: int) -> None:
+        self.symbol = symbol
+        self.bar_seconds = bar_seconds
+        self.bar_start: float | None = None
+        self._o = self._h = self._l = self._c = 0.0
+        self._ticks = 0
+
+    def _boundary(self, ts: float) -> float:
+        return math.floor(ts / self.bar_seconds) * self.bar_seconds
+
+    def add(self, ts: float, price: float) -> Candle | None:
+        """Add a tick; return a completed :class:`Candle` when the bar rolls over."""
+        b = self._boundary(ts)
+        completed: Candle | None = None
+        if self.bar_start is None:
+            self.bar_start = b
+        elif b > self.bar_start:
+            completed = self.snapshot()
+            self.bar_start = b
+            self._ticks = 0
+        if self._ticks == 0:
+            self._o = self._h = self._l = self._c = price
+        else:
+            self._h = max(self._h, price)
+            self._l = min(self._l, price)
+            self._c = price
+        self._ticks += 1
+        return completed
+
+    def snapshot(self) -> Candle | None:
+        if self._ticks == 0 or self.bar_start is None:
+            return None
+        return Candle(
+            symbol=self.symbol,
+            timestamp=self.bar_start,
+            open=self._o,
+            high=self._h,
+            low=self._l,
+            close=self._c,
+            volume=float(self._ticks),
+        )
+
+
+class OandaStreamFeed(MarketDataFeed):
+    """Real-time feed off OANDA's pricing *stream* (not polling).
+
+    Holds a streaming HTTP connection open on a background thread and
+    aggregates incoming bid/ask ticks into ``bar_seconds`` OHLC candles. A
+    completed candle is emitted as soon as the first tick of the next bar
+    arrives; the final partial bar is flushed when the stream ends.
+    """
+
+    def __init__(
+        self,
+        client: OandaClient,
+        symbol: str,
+        bar_seconds: int = 60,
+        max_bars: int | None = None,
+    ) -> None:
+        self.client = client
+        self.symbol = symbol
+        self.instrument = to_oanda_symbol(symbol)
+        self.bar_seconds = bar_seconds
+        self.max_bars = max_bars
+
+    @staticmethod
+    def _mid(msg: dict) -> float | None:
+        bids = msg.get("bids") or []
+        asks = msg.get("asks") or []
+        if bids and asks:
+            return (float(bids[0]["price"]) + float(asks[0]["price"])) / 2.0
+        if bids:
+            return float(bids[0]["price"])
+        if asks:
+            return float(asks[0]["price"])
+        return None
+
+    async def stream(self) -> AsyncIterator[Candle]:
+        loop = asyncio.get_event_loop()
+        q: queue.Queue = queue.Queue()
+        sentinel = object()
+
+        def producer() -> None:
+            try:
+                for msg in self.client.stream_prices(self.instrument):
+                    q.put(msg)
+            except Exception as exc:  # noqa: BLE001 - surface to the consumer
+                q.put(exc)
+            finally:
+                q.put(sentinel)
+
+        threading.Thread(target=producer, daemon=True).start()
+        agg = _BarAggregator(self.symbol, self.bar_seconds)
+        emitted = 0
+        while True:
+            msg = await loop.run_in_executor(None, q.get)
+            if msg is sentinel:
+                final = agg.snapshot()
+                if final is not None:
+                    yield final
+                return
+            if isinstance(msg, Exception):
+                raise msg
+            if msg.get("type") != "PRICE":
+                continue  # skip heartbeats
+            price = self._mid(msg)
+            if price is None:
+                continue
+            ts = _rfc3339_to_epoch(msg.get("time", "0"))
+            candle = agg.add(ts, price)
+            if candle is not None:
+                yield candle
                 emitted += 1
                 if self.max_bars and emitted >= self.max_bars:
                     return
