@@ -165,23 +165,5 @@ class PaperBroker(Broker):
         return sum(1 for p in self.positions.values() if p.size != 0)
 
 
-class OandaBroker(Broker):
-    """Live-broker stub. Refuses to trade until a real integration is added."""
-
-    def __init__(self, account_id: str, token: str, practice: bool = True):
-        self.account_id = account_id
-        self.token = token
-        self.practice = practice
-
-    def submit(self, order: Order, mark_price: float) -> Fill | None:  # pragma: no cover
-        raise NotImplementedError(
-            "OandaBroker is a live-trading stub. Implement order submission "
-            "against the OANDA v3 orders endpoint before using real money."
-        )
-
-    def mark_to_market(self, symbol: str, price: float) -> None:  # pragma: no cover
-        pass
-
-    @property
-    def equity(self) -> float:  # pragma: no cover
-        raise NotImplementedError
+# A real OANDA broker lives in ``babayaga.integration.oanda`` (imported lazily to
+# avoid a circular import, since that module imports from this one).

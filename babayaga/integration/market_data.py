@@ -108,24 +108,5 @@ class ReplayFeed(MarketDataFeed):
                 await asyncio.sleep(self.interval)
 
 
-class OandaFeed(MarketDataFeed):
-    """Stub for OANDA's streaming pricing endpoint.
-
-    Left intentionally unimplemented so the OS never opens a network connection
-    by accident. To go live, implement :meth:`stream` against
-    ``/v3/accounts/{id}/pricing/stream`` and yield :class:`Candle` objects. The
-    rest of the OS needs no changes — it only depends on ``MarketDataFeed``.
-    """
-
-    def __init__(self, symbol: str, account_id: str, token: str, practice: bool = True):
-        self.symbol = symbol
-        self.account_id = account_id
-        self.token = token
-        self.practice = practice
-
-    async def stream(self) -> AsyncIterator[Candle]:  # pragma: no cover - stub
-        raise NotImplementedError(
-            "OandaFeed is a live-trading stub. Implement the streaming request "
-            "against the OANDA v3 pricing API and supply valid credentials."
-        )
-        yield  # pragma: no cover - makes this an async generator
+# A real OANDA feed lives in ``babayaga.integration.oanda`` (imported lazily to
+# avoid a circular import, since that module imports from this one).

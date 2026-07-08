@@ -30,6 +30,7 @@ class Config:
     sim_steps: int = 500
     sim_seed: int | None = 7
     sim_start_price: float = 1.1000
+    sim_interval: float = 0.0        # seconds between simulated bars (>0 for live UIs)
 
     # Safety switch. The OS is paper-only; this must stay False unless you have
     # implemented and vetted a real broker adapter yourself.

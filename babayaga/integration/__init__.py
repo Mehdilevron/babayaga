@@ -1,20 +1,38 @@
-"""Integration layer: pluggable market-data feeds and broker adapters."""
+"""Integration layer: pluggable market-data feeds and broker adapters.
 
-from babayaga.integration.broker import Broker, OandaBroker, PaperBroker, Position
+The OANDA adapter (``OandaClient``, ``OandaFeed``, ``OandaBroker``) lives in
+``babayaga.integration.oanda`` and is imported lazily via ``__getattr__`` so the
+core has zero import-time coupling to it.
+"""
+
+from typing import TYPE_CHECKING
+
+from babayaga.integration.broker import Broker, PaperBroker, Position
 from babayaga.integration.market_data import (
     MarketDataFeed,
-    OandaFeed,
     ReplayFeed,
     SimulatedFeed,
 )
+
+if TYPE_CHECKING:  # for type checkers / IDEs only
+    from babayaga.integration.oanda import OandaBroker, OandaClient, OandaFeed
 
 __all__ = [
     "MarketDataFeed",
     "SimulatedFeed",
     "ReplayFeed",
-    "OandaFeed",
     "Broker",
     "PaperBroker",
-    "OandaBroker",
     "Position",
+    "OandaClient",
+    "OandaFeed",
+    "OandaBroker",
 ]
+
+
+def __getattr__(name: str):
+    if name in {"OandaClient", "OandaFeed", "OandaBroker"}:
+        from babayaga.integration import oanda
+
+        return getattr(oanda, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

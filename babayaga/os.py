@@ -155,6 +155,7 @@ class TradingOS:
                         start_price=self.config.sim_start_price,
                         steps=self.config.sim_steps,
                         seed=self.config.sim_seed,
+                        interval=self.config.sim_interval,
                     ),
                 )
 
