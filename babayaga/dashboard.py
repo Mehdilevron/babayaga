@@ -275,9 +275,54 @@ es.onmessage = e => {
 </body></html>"""
 
 
+def _lan_ips() -> list[str]:
+    """Best-effort list of this machine's LAN IPv4 addresses."""
+    import socket
+
+    ips: list[str] = []
+    # Primary outbound interface (doesn't actually send traffic).
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            s.connect(("8.8.8.8", 80))
+            ips.append(s.getsockname()[0])
+        finally:
+            s.close()
+    except OSError:
+        pass
+    # Anything else resolvable for the hostname.
+    try:
+        for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
+            ip = info[4][0]
+            if ip not in ips and not ip.startswith("127."):
+                ips.append(ip)
+    except OSError:
+        pass
+    return ips
+
+
+def _print_access_banner(host: str, port: int) -> None:
+    print(f"BabaYaga dashboard live  (paper, simulated)")
+    if host in ("0.0.0.0", "::"):
+        print(f"  On this machine : http://127.0.0.1:{port}")
+        lan = _lan_ips()
+        if lan:
+            print("  On your network : " + "  ".join(f"http://{ip}:{port}" for ip in lan))
+            print("  (open the network URL from your phone/laptop on the same Wi-Fi)")
+        else:
+            print("  On your network : http://<this-machine-ip>:" + str(port))
+        print("  ⚠  Bound to 0.0.0.0 — reachable by any device on your network. "
+              "It's paper-only and read-only, but don't expose it to the public internet.")
+    else:
+        print(f"  URL             : http://{host}:{port}")
+        if host in ("127.0.0.1", "localhost"):
+            print("  (local only — pass --host 0.0.0.0 to reach it from other devices)")
+
+
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="babayaga.dashboard", description="BabaYaga live dashboard")
-    p.add_argument("--host", default="127.0.0.1")
+    p.add_argument("--host", default="127.0.0.1",
+                   help="bind address; use 0.0.0.0 to allow other devices on your network")
     p.add_argument("--port", type=int, default=8765)
     p.add_argument("--symbol", default="EUR/USD")
     p.add_argument("--steps", type=int, default=1000)
@@ -299,7 +344,7 @@ def main(argv: list[str] | None = None) -> int:
     os_ = TradingOS(cfg)
     dash = Dashboard(os_, host=args.host, port=args.port)
     dash.serve_forever_in_thread()
-    print(f"BabaYaga dashboard live at http://{args.host}:{args.port}  (paper, simulated)")
+    _print_access_banner(args.host, args.port)
     print("Ctrl-C to stop.")
     try:
         asyncio.run(os_.run())

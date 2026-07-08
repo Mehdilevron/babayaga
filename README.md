@@ -105,7 +105,15 @@ signals and fills update live:
 ```bash
 python -m babayaga.dashboard --port 8765 --steps 800 --interval 0.06
 # then open http://127.0.0.1:8765
+
+# To watch it from your phone/another device on the same Wi-Fi, bind to all
+# interfaces; the banner then prints a ready-to-open network URL:
+python -m babayaga.dashboard --host 0.0.0.0 --port 8765
+#   On your network : http://192.168.1.42:8765
 ```
+
+> Binding to `0.0.0.0` exposes the page to every device on your local network.
+> It's paper-only and read-only, but don't forward it to the public internet.
 
 The dashboard is just another *observer* on the bus (`os_.on(topic, handler)`) —
 it never touches trading logic, which is the whole point of the coordination
