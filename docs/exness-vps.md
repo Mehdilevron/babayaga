@@ -56,8 +56,19 @@ set EXNESS_PASSWORD=your-demo-password
 set EXNESS_SERVER=Exness-MT5Trial9
 set EXNESS_SYMBOL=XAU/USD
 rem If your account shows the symbol as "XAUUSDm", also:  set EXNESS_SUFFIX=m
+rem Recommended risk guardrails (work on demo and live):
+set MAX_LOT=0.01
+set DAILY_MAX_LOSS=10
 python examples\run_exness.py
 ```
+
+**Guardrails** (optional but strongly recommended, especially before live):
+
+- `MAX_LOT` — hard cap on lots per order. `0.01` keeps every trade at the gold
+  minimum regardless of what the sizing model asks for.
+- `DAILY_MAX_LOSS` — once your equity is down this much (account currency) from
+  the day's open, the bot stops opening new trades until the next day. Open
+  positions keep their attached stop-loss.
 
 You should see:
 

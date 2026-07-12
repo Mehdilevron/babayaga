@@ -43,8 +43,9 @@ class FakeMT5:
     ORDER_FILLING_IOC = 1
     TIMEFRAME_M1 = 1
 
-    def __init__(self, trade_mode=DEMO, rates=None, order_retcode=RETCODE_DONE):
-        self._account = _account(trade_mode)
+    def __init__(self, trade_mode=DEMO, rates=None, order_retcode=RETCODE_DONE,
+                 balance=100.0, equity=100.0):
+        self._account = _account(trade_mode, balance=balance, equity=equity)
         self._rates = rates or []
         self._order_retcode = order_retcode
         self.sent_requests = []
@@ -163,3 +164,32 @@ def test_rejected_order_returns_none():
     mt5 = FakeMT5(trade_mode=DEMO, order_retcode=10004)  # requote / not done
     broker = ExnessMT5Broker(mt5)
     assert broker.submit(Order("XAU/USD", Side.BUY, 100), mark_price=2000.0) is None
+
+
+def test_max_lot_caps_order_size():
+    mt5 = FakeMT5(trade_mode=DEMO)
+    broker = ExnessMT5Broker(mt5, max_lot=0.05)
+    # 100 units / 100 per lot = 1.0 lot, but capped to 0.05.
+    broker.submit(Order("XAU/USD", Side.BUY, 100), mark_price=2000.0)
+    assert mt5.sent_requests[0]["volume"] == 0.05
+
+
+def test_daily_loss_kill_switch_blocks_new_trades():
+    mt5 = FakeMT5(trade_mode=DEMO, balance=100.0, equity=100.0)
+    broker = ExnessMT5Broker(mt5, daily_max_loss=10.0)
+    # First trade is allowed while within the loss budget.
+    assert broker.submit(Order("XAU/USD", Side.BUY, 100), mark_price=2000.0) is not None
+    # Simulate the account dropping $15 (> $10 daily cap).
+    mt5._account.equity = 85.0
+    blocked = broker.submit(Order("XAU/USD", Side.BUY, 100), mark_price=2000.0)
+    assert blocked is None
+    assert broker.halted_daily is True
+
+
+def test_daily_guard_inactive_when_unset():
+    mt5 = FakeMT5(trade_mode=DEMO, balance=100.0, equity=100.0)
+    broker = ExnessMT5Broker(mt5)  # no daily_max_loss
+    mt5._account.equity = 1.0  # huge loss
+    # Without a configured limit, trading continues.
+    assert broker.submit(Order("XAU/USD", Side.BUY, 100), mark_price=2000.0) is not None
+    assert broker.halted_daily is False

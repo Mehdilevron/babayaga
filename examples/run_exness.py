@@ -14,6 +14,9 @@ Configure via environment variables:
     MT5_PATH          (optional) full path to terminal64.exe
     EXNESS_SYMBOL     instrument, default "XAU/USD" (gold)
     EXNESS_SUFFIX     (optional) symbol suffix your account uses, e.g. "m" -> XAUUSDm
+    MAX_LOT           (optional, recommended) hard cap on lots per order, e.g. 0.01
+    DAILY_MAX_LOSS    (optional, recommended) stop opening trades after this much
+                      loss in account currency in a day, e.g. 10
     CONFIRM_LIVE      must be exactly "I_UNDERSTAND" to allow a REAL account to trade
 
 SAFETY: On a REAL (live) account the broker refuses to place orders unless
@@ -57,7 +60,15 @@ def main() -> int:
         terminal_path=os.environ.get("MT5_PATH") or None,
     )
 
-    broker = ExnessMT5Broker(mt5, symbol_suffix=suffix, confirm_live=confirm_live)
+    max_lot = os.environ.get("MAX_LOT")
+    daily_max_loss = os.environ.get("DAILY_MAX_LOSS")
+    broker = ExnessMT5Broker(
+        mt5,
+        symbol_suffix=suffix,
+        confirm_live=confirm_live,
+        max_lot=float(max_lot) if max_lot else None,
+        daily_max_loss=float(daily_max_loss) if daily_max_loss else None,
+    )
     mode = "LIVE (real money)" if broker.is_live else "DEMO (virtual money)"
     if broker.is_live and not confirm_live:
         print("REAL account detected and CONFIRM_LIVE is not set — the bot will "

@@ -164,6 +164,8 @@ class ExnessMT5Broker(Broker):
         deviation: int = 20,
         magic: int = 990099,
         confirm_live: bool = False,
+        max_lot: float | None = None,        # hard cap on lots per order
+        daily_max_loss: float | None = None,  # stop opening trades after this loss
     ) -> None:
         self.mt5 = mt5
         self.symbol_suffix = symbol_suffix
@@ -171,6 +173,8 @@ class ExnessMT5Broker(Broker):
         self.deviation = deviation
         self.magic = magic
         self.confirm_live = confirm_live
+        self.max_lot = max_lot
+        self.daily_max_loss = daily_max_loss
 
         self.positions: dict[str, Position] = {}
         self.realized_pnl = 0.0
@@ -181,6 +185,26 @@ class ExnessMT5Broker(Broker):
         self.is_live = self._detect_live()
         self.blocked = self.is_live and not self.confirm_live
         self.refresh_account()
+
+        # Daily loss kill-switch state.
+        self.halted_daily = False
+        self._warned_daily = False
+        self._day = time.strftime("%Y-%m-%d")
+        self._day_anchor_equity = self._equity
+
+    def _update_daily_guard(self) -> None:
+        """Trip the kill-switch if today's loss from the day's opening equity
+        exceeds ``daily_max_loss``. Resets automatically at day rollover."""
+        today = time.strftime("%Y-%m-%d")
+        if today != self._day:
+            self._day = today
+            self._day_anchor_equity = self._equity
+            self.halted_daily = False
+            self._warned_daily = False
+        if self.daily_max_loss is not None:
+            loss = self._day_anchor_equity - self._equity
+            if loss >= self.daily_max_loss:
+                self.halted_daily = True
 
     # -- account type gate ------------------------------------------------
     def _detect_live(self) -> bool:
@@ -225,6 +249,8 @@ class ExnessMT5Broker(Broker):
             vol_step = float(getattr(info, "volume_step", vol_step) or vol_step)
             contract = float(getattr(info, "trade_contract_size", contract) or contract)
         lots = units / contract if contract else 0.0
+        if self.max_lot is not None:
+            lots = min(lots, self.max_lot)
         if vol_step > 0:
             lots = math.floor(lots / vol_step) * vol_step
         lots = max(vol_min, min(vol_max, lots))
@@ -239,6 +265,18 @@ class ExnessMT5Broker(Broker):
                 "REAL Exness account detected and confirm_live is False — refusing "
                 "to trade. Set confirm_live=True only after your own review."
             )
+        # Daily loss kill-switch: once tripped, stop opening/adjusting positions.
+        # Existing positions keep their broker-side stop-loss/take-profit.
+        self.refresh_account()
+        self._update_daily_guard()
+        if self.halted_daily:
+            if not self._warned_daily:
+                print(
+                    f"[risk] DAILY LOSS LIMIT hit "
+                    f"(-{self.daily_max_loss}); halting new trades until tomorrow."
+                )
+                self._warned_daily = True
+            return None
         sym = to_mt5_symbol(order.symbol, self.symbol_suffix)
         lots = self._units_to_lots(sym, order.size)
 
