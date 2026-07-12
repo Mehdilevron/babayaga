@@ -15,6 +15,7 @@ from babayaga.integration.market_data import (
 )
 
 if TYPE_CHECKING:  # for type checkers / IDEs only
+    from babayaga.integration.exness import ExnessMT5Broker, ExnessMT5Feed
     from babayaga.integration.oanda import (
         OandaBroker,
         OandaClient,
@@ -33,12 +34,21 @@ __all__ = [
     "OandaFeed",
     "OandaStreamFeed",
     "OandaBroker",
+    "ExnessMT5Feed",
+    "ExnessMT5Broker",
 ]
+
+_OANDA = {"OandaClient", "OandaFeed", "OandaStreamFeed", "OandaBroker"}
+_EXNESS = {"ExnessMT5Feed", "ExnessMT5Broker"}
 
 
 def __getattr__(name: str):
-    if name in {"OandaClient", "OandaFeed", "OandaStreamFeed", "OandaBroker"}:
+    if name in _OANDA:
         from babayaga.integration import oanda
 
         return getattr(oanda, name)
+    if name in _EXNESS:
+        from babayaga.integration import exness
+
+        return getattr(exness, name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

@@ -185,6 +185,15 @@ replay feeds), and the OANDA adapter (offline, via a fake transport).
 
 ---
 
+## Exness (MetaTrader 5)
+
+Exness has no REST API — it trades through MetaTrader 5, whose Python bridge is
+Windows-only. `babayaga.integration.exness` implements an MT5 feed + broker and
+**auto-detects a live account, refusing to trade it unless you pass
+`confirm_live=True`**. See **[docs/exness-vps.md](docs/exness-vps.md)** for the
+full Windows-VPS setup (demo first) and `examples/run_exness.py` for the
+launcher.
+
 ## Going live (what would be required)
 
 This repo intentionally stops short of live trading. To take it there you would
