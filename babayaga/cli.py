@@ -20,7 +20,7 @@ from babayaga.os import TradingOS
 
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="babayaga", description="BabaYaga forex trading OS (paper only)")
-    p.add_argument("--symbol", default="EUR/USD", help="instrument to trade")
+    p.add_argument("--symbol", default="XAU/USD", help="instrument to trade, e.g. XAU/USD (gold), EUR/USD")
     p.add_argument("--steps", type=int, default=500, help="number of simulated bars")
     p.add_argument("--seed", type=int, default=7, help="simulation RNG seed")
     p.add_argument("--cash", type=float, default=100_000.0, help="starting cash")

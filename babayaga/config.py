@@ -14,7 +14,8 @@ class Config:
 
     # Account / broker.
     starting_cash: float = 100_000.0
-    spread: float = 0.0001          # 1 pip on a 4-decimal FX pair
+    # Spread in price units. None -> pick a realistic value for the first symbol.
+    spread: float | None = None
     commission_per_unit: float = 0.0
 
     # Data window each agent sees.
@@ -29,7 +30,8 @@ class Config:
     # Simulation defaults (used by the demo/backtest feed).
     sim_steps: int = 500
     sim_seed: int | None = 7
-    sim_start_price: float = 1.1000
+    # Starting price for the simulated feed. None -> a realistic price per symbol.
+    sim_start_price: float | None = None
     sim_interval: float = 0.0        # seconds between simulated bars (>0 for live UIs)
 
     # Safety switch. The OS is paper-only; this must stay False unless you have

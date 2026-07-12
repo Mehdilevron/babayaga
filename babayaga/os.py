@@ -26,7 +26,12 @@ from babayaga.agents.technical import TechnicalAgent
 from babayaga.analytics.metrics import PerformanceSummary, performance_summary
 from babayaga.config import Config
 from babayaga.integration.broker import PaperBroker
-from babayaga.integration.market_data import MarketDataFeed, SimulatedFeed
+from babayaga.integration.market_data import (
+    MarketDataFeed,
+    SimulatedFeed,
+    typical_price,
+    typical_spread,
+)
 from babayaga.kernel.bus import EventBus
 from babayaga.kernel.events import (
     AccountSnapshot,
@@ -49,9 +54,15 @@ class TradingOS:
         self.memory = MemoryStore(self.config.memory_path)
 
         # --- integration layer ----------------------------------------
+        primary = self.config.symbols[0] if self.config.symbols else "EUR/USD"
+        spread = (
+            self.config.spread
+            if self.config.spread is not None
+            else typical_spread(primary)
+        )
         self.broker = PaperBroker(
             starting_cash=self.config.starting_cash,
-            spread=self.config.spread,
+            spread=spread,
             commission_per_unit=self.config.commission_per_unit,
         )
 
@@ -152,7 +163,11 @@ class TradingOS:
                     sym,
                     SimulatedFeed(
                         symbol=sym,
-                        start_price=self.config.sim_start_price,
+                        start_price=(
+                            self.config.sim_start_price
+                            if self.config.sim_start_price is not None
+                            else typical_price(sym)
+                        ),
                         steps=self.config.sim_steps,
                         seed=self.config.sim_seed,
                         interval=self.config.sim_interval,

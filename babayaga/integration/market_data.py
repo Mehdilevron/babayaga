@@ -18,6 +18,31 @@ from collections.abc import AsyncIterator, Iterable, Sequence
 
 from babayaga.kernel.events import Candle
 
+# Typical starting price and spread (in price units) for common instruments, so
+# the simulated feed and paper broker produce realistic numbers per instrument
+# instead of always looking like EUR/USD. Used only when the caller doesn't set
+# an explicit value.
+_TYPICAL: dict[str, tuple[float, float]] = {
+    "EUR/USD": (1.1000, 0.00008),
+    "GBP/USD": (1.2700, 0.00012),
+    "USD/JPY": (150.00, 0.010),
+    "AUD/USD": (0.6600, 0.00012),
+    "USD/CHF": (0.8800, 0.00012),
+    "USD/CAD": (1.3600, 0.00012),
+    "XAU/USD": (2000.0, 0.30),      # gold
+    "XAG/USD": (24.00, 0.020),      # silver
+    "BTC/USD": (60000.0, 5.0),
+    "ETH/USD": (3000.0, 1.0),
+}
+
+
+def typical_price(symbol: str) -> float:
+    return _TYPICAL.get(symbol.upper(), (1.1000, 0.00008))[0]
+
+
+def typical_spread(symbol: str) -> float:
+    return _TYPICAL.get(symbol.upper(), (1.1000, 0.00008))[1]
+
 
 class MarketDataFeed(ABC):
     """Base class for all market-data sources."""

@@ -324,7 +324,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--host", default="127.0.0.1",
                    help="bind address; use 0.0.0.0 to allow other devices on your network")
     p.add_argument("--port", type=int, default=8765)
-    p.add_argument("--symbol", default="EUR/USD")
+    p.add_argument("--symbol", default="XAU/USD", help="instrument, e.g. XAU/USD (gold), EUR/USD")
     p.add_argument("--steps", type=int, default=1000)
     p.add_argument("--seed", type=int, default=7)
     p.add_argument("--interval", type=float, default=0.08, help="seconds between bars")
