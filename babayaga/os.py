@@ -157,8 +157,10 @@ class TradingOS:
                 "Refusing to run to avoid any real-money action."
             )
         if not self._feeds:
-            # Default: a simulated feed per configured symbol.
-            for sym in self.config.symbols:
+            # Default: a simulated feed per configured symbol. Offset the seed
+            # per symbol so each pair follows its own distinct price path.
+            for i, sym in enumerate(self.config.symbols):
+                seed = None if self.config.sim_seed is None else self.config.sim_seed + i
                 self.attach_feed(
                     sym,
                     SimulatedFeed(
@@ -169,7 +171,7 @@ class TradingOS:
                             else typical_price(sym)
                         ),
                         steps=self.config.sim_steps,
-                        seed=self.config.sim_seed,
+                        seed=seed,
                         interval=self.config.sim_interval,
                     ),
                 )
