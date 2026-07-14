@@ -37,6 +37,24 @@ def test_event_bus_observers_receive_stream():
     os_.shutdown()
 
 
+def test_simulated_feed_runs_forever_when_steps_zero():
+    from babayaga.integration.market_data import SimulatedFeed
+
+    feed = SimulatedFeed(steps=0, seed=1)  # 0 => nonstop
+
+    async def take(n):
+        out = []
+        async for c in feed.stream():
+            out.append(c)
+            if len(out) >= n:
+                break
+        return out
+
+    # It keeps producing well past any fixed bound; we stop it ourselves.
+    got = asyncio.run(take(300))
+    assert len(got) == 300
+
+
 def test_replay_feed_drives_the_os():
     # A clean uptrend should end with the agents net long and equity intact.
     rows = []

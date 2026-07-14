@@ -83,7 +83,10 @@ class SimulatedFeed(MarketDataFeed):
         drift = 0.0
         regime_len = 0
         ts = time.time()
-        for _ in range(self.steps):
+        # steps <= 0 means run forever (24/7) until the task is cancelled.
+        i = 0
+        while self.steps <= 0 or i < self.steps:
+            i += 1
             if regime_len <= 0:
                 # Switch regime: pick a fresh drift and duration.
                 drift = self._rng.uniform(-1.0, 1.0) * self._sigma * 0.5

@@ -330,7 +330,7 @@ def _build_parser() -> argparse.ArgumentParser:
         help="one or more instruments, comma-separated (the bot scans them all)",
     )
     p.add_argument("--cash", type=float, default=1000.0, help="starting account balance")
-    p.add_argument("--steps", type=int, default=1000)
+    p.add_argument("--steps", type=int, default=0, help="number of bars; 0 = run nonstop (24/7)")
     p.add_argument("--seed", type=int, default=7)
     p.add_argument("--interval", type=float, default=0.08, help="seconds between bars")
     return p
