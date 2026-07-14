@@ -12,7 +12,8 @@ Configure via environment variables:
     EXNESS_PASSWORD   the account password
     EXNESS_SERVER     the MT5 server name (e.g. "Exness-MT5Trial9" or your live server)
     MT5_PATH          (optional) full path to terminal64.exe
-    EXNESS_SYMBOL     instrument, default "XAU/USD" (gold)
+    EXNESS_SYMBOL     one instrument or a comma-separated basket the bot scans,
+                      default "EUR/USD,GBP/USD,USD/JPY,AUD/USD,USD/CAD"
     EXNESS_SUFFIX     (optional) symbol suffix your account uses, e.g. "m" -> XAUUSDm
     MAX_LOT           (optional, recommended) hard cap on lots per order, e.g. 0.01
     DAILY_MAX_LOSS    (optional, recommended) stop opening trades after this much
@@ -47,7 +48,10 @@ def _require(name: str) -> str:
 
 
 def main() -> int:
-    symbol = os.environ.get("EXNESS_SYMBOL", "XAU/USD")
+    # EXNESS_SYMBOL may be a single instrument or a comma-separated basket the
+    # bot scans together, e.g. "EUR/USD,GBP/USD,USD/JPY,AUD/USD,USD/CAD".
+    raw = os.environ.get("EXNESS_SYMBOL", "EUR/USD,GBP/USD,USD/JPY,AUD/USD,USD/CAD")
+    symbols = tuple(s.strip() for s in raw.split(",") if s.strip())
     suffix = os.environ.get("EXNESS_SUFFIX", "")
     confirm_live = os.environ.get("CONFIRM_LIVE", "") == "I_UNDERSTAND"
 
@@ -73,14 +77,16 @@ def main() -> int:
     if broker.is_live and not confirm_live:
         print("REAL account detected and CONFIRM_LIVE is not set — the bot will "
               "NOT place orders. Set CONFIRM_LIVE=I_UNDERSTAND to enable (your call).")
-    print(f"Exness account: {mode}  |  symbol {symbol}{(' suffix ' + suffix) if suffix else ''}")
+    basket = ", ".join(symbols) + (f"  (suffix {suffix})" if suffix else "")
+    print(f"Exness account: {mode}  |  pairs: {basket}")
     print(f"Balance: {broker.cash:.2f}   Equity: {broker.equity:.2f}")
 
-    # sim_steps=0 => no simulated feed; we attach the real Exness feed instead.
-    os_ = TradingOS(Config(symbols=(symbol,), sim_steps=0))
+    # sim_steps=0 => no simulated feed; we attach a real Exness feed per pair.
+    os_ = TradingOS(Config(symbols=symbols, sim_steps=0))
     os_.broker = broker
     os_.execution.broker = broker
-    os_.attach_feed(symbol, ExnessMT5Feed(mt5, symbol, timeframe="M1", suffix=suffix))
+    for sym in symbols:
+        os_.attach_feed(sym, ExnessMT5Feed(mt5, sym, timeframe="M1", suffix=suffix))
 
     dash = Dashboard(os_, host=os.environ.get("HOST", "127.0.0.1"), port=int(os.environ.get("PORT", "8765")))
     dash.serve_forever_in_thread()

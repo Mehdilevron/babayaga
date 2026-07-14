@@ -54,13 +54,18 @@ Still in Command Prompt, set your account details and launch. **Leave
 set EXNESS_LOGIN=12345678
 set EXNESS_PASSWORD=your-demo-password
 set EXNESS_SERVER=Exness-MT5Trial9
-set EXNESS_SYMBOL=XAU/USD
-rem If your account shows the symbol as "XAUUSDm", also:  set EXNESS_SUFFIX=m
+rem One pair or a comma-separated basket the bot scans (default is 5 FX majors):
+set EXNESS_SYMBOL=EUR/USD,GBP/USD,USD/JPY,AUD/USD,USD/CAD
+rem If your account adds a suffix (e.g. EURUSDm), set it once for all pairs:
+rem set EXNESS_SUFFIX=m
 rem Recommended risk guardrails (work on demo and live):
 set MAX_LOT=0.01
 set DAILY_MAX_LOSS=10
 python examples\run_exness.py
 ```
+
+> On a small account, prefer FX majors over gold — gold's minimum lot is too
+> large to size sensibly. The default basket above sizes fine on a demo balance.
 
 **Guardrails** (optional but strongly recommended, especially before live):
 
