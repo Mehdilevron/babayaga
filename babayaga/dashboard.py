@@ -325,6 +325,7 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="bind address; use 0.0.0.0 to allow other devices on your network")
     p.add_argument("--port", type=int, default=8765)
     p.add_argument("--symbol", default="XAU/USD", help="instrument, e.g. XAU/USD (gold), EUR/USD")
+    p.add_argument("--cash", type=float, default=100_000.0, help="starting account balance")
     p.add_argument("--steps", type=int, default=1000)
     p.add_argument("--seed", type=int, default=7)
     p.add_argument("--interval", type=float, default=0.08, help="seconds between bars")
@@ -337,6 +338,7 @@ def main(argv: list[str] | None = None) -> int:
 
     cfg = Config(
         symbols=(args.symbol,),
+        starting_cash=args.cash,
         sim_steps=args.steps,
         sim_seed=args.seed,
         sim_interval=args.interval,
