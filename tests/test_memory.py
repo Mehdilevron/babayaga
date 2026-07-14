@@ -37,6 +37,32 @@ def test_signal_and_fill_counts():
     m.close()
 
 
+def test_tick_retention_cap_bounds_ticks_but_keeps_trades():
+    from babayaga.kernel.events import Fill
+
+    m = MemoryStore(":memory:", max_ticks=500, prune_every=100)
+    # Fire far more ticks than the cap, plus some fills interleaved.
+    for i in range(5000):
+        m.record_tick(_candle(ts=float(i), close=1.10 + i * 1e-6))
+        if i % 250 == 0:
+            m.record_fill(Fill("EUR/USD", Side.BUY, 1000, 1.10))
+    counts = m.counts()
+    # Ticks are bounded near the cap (allowing one prune interval of slack).
+    assert counts["ticks"] <= 500 + 100
+    assert counts["ticks"] >= 500
+    # Every trade is still remembered — the ledger is never pruned.
+    assert counts["fills"] == 20
+    m.close()
+
+
+def test_unbounded_by_default():
+    m = MemoryStore(":memory:")  # no caps
+    for i in range(2000):
+        m.record_tick(_candle(ts=float(i)))
+    assert m.counts()["ticks"] == 2000
+    m.close()
+
+
 def test_confidence_is_clamped():
     s = Signal("x", "EUR/USD", Side.BUY, 5.0, "over")
     assert s.confidence == 1.0

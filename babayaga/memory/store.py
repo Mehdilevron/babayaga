@@ -78,8 +78,30 @@ CREATE TABLE IF NOT EXISTS knowledge (
 
 
 class MemoryStore:
-    def __init__(self, path: str | Path = ":memory:") -> None:
+    def __init__(
+        self,
+        path: str | Path = ":memory:",
+        max_ticks: int | None = None,
+        max_signals: int | None = None,
+        max_decisions: int | None = None,
+        prune_every: int = 1000,
+    ) -> None:
+        """Persistent event/knowledge store.
+
+        ``max_ticks`` / ``max_signals`` bound the two high-volume tables so an
+        ultra-fast, nonstop run stays memory-safe. When set, only the most
+        recent N rows are kept in each. The **trade ledger** (``fills``) and
+        ``decisions`` are NEVER pruned — every trade is remembered forever.
+        ``None`` means unbounded (the default, unchanged behaviour).
+        """
         self.path = str(path)
+        self.max_ticks = max_ticks
+        self.max_signals = max_signals
+        self.max_decisions = max_decisions
+        self.prune_every = max(1, prune_every)
+        self._since_tick_prune = 0
+        self._since_signal_prune = 0
+        self._since_decision_prune = 0
         if self.path != ":memory:":
             Path(self.path).parent.mkdir(parents=True, exist_ok=True)
         # check_same_thread=False + a lock lets async tasks share one connection.
@@ -94,6 +116,14 @@ class MemoryStore:
         with self._lock:
             self._conn.close()
 
+    def _prune(self, table: str, keep: int) -> None:
+        """Delete all but the newest ``keep`` rows of a high-volume table."""
+        self._conn.execute(
+            f"DELETE FROM {table} WHERE id <= "  # noqa: S608 — fixed identifiers
+            f"(SELECT MAX(id) FROM {table}) - ?",
+            (keep,),
+        )
+
     # -- writes -----------------------------------------------------------
     def record_tick(self, c: Candle) -> None:
         with self._lock:
@@ -102,6 +132,11 @@ class MemoryStore:
                 " VALUES(?,?,?,?,?,?,?)",
                 (c.symbol, c.timestamp, c.open, c.high, c.low, c.close, c.volume),
             )
+            if self.max_ticks is not None:
+                self._since_tick_prune += 1
+                if self._since_tick_prune >= self.prune_every:
+                    self._since_tick_prune = 0
+                    self._prune("ticks", self.max_ticks)
             self._conn.commit()
 
     def record_signal(self, s: Signal) -> None:
@@ -119,6 +154,11 @@ class MemoryStore:
                     s.timestamp,
                 ),
             )
+            if self.max_signals is not None:
+                self._since_signal_prune += 1
+                if self._since_signal_prune >= self.prune_every:
+                    self._since_signal_prune = 0
+                    self._prune("signals", self.max_signals)
             self._conn.commit()
 
     def record_decision(self, d: Decision) -> None:
@@ -137,6 +177,11 @@ class MemoryStore:
                     d.timestamp,
                 ),
             )
+            if self.max_decisions is not None:
+                self._since_decision_prune += 1
+                if self._since_decision_prune >= self.prune_every:
+                    self._since_decision_prune = 0
+                    self._prune("decisions", self.max_decisions)
             self._conn.commit()
 
     def record_fill(self, f: Fill) -> None:

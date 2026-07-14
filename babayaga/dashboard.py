@@ -333,6 +333,10 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--steps", type=int, default=0, help="number of bars; 0 = run nonstop (24/7)")
     p.add_argument("--seed", type=int, default=7)
     p.add_argument("--interval", type=float, default=0.08, help="seconds between bars")
+    p.add_argument("--memory", default=":memory:",
+                   help="SQLite path for persistent memory (e.g. babayaga.sqlite), or :memory:")
+    p.add_argument("--max-ticks", type=int, default=100_000, dest="max_ticks",
+                   help="cap on retained ticks/signals for nonstop runs; trades are never pruned")
     return p
 
 
@@ -347,6 +351,12 @@ def main(argv: list[str] | None = None) -> int:
         sim_steps=args.steps,
         sim_seed=args.seed,
         sim_interval=args.interval,
+        memory_path=args.memory,
+        # Bound the firehose so a nonstop, ultra-fast run stays memory-safe.
+        # Trades (fills) are never pruned — every trade is remembered.
+        memory_max_ticks=args.max_ticks,
+        memory_max_signals=args.max_ticks,
+        memory_max_decisions=args.max_ticks,
     )
     os_ = TradingOS(cfg)
     dash = Dashboard(os_, host=args.host, port=args.port)

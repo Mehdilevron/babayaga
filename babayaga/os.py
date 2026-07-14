@@ -51,7 +51,12 @@ class TradingOS:
 
         # --- kernel + persistence -------------------------------------
         self.bus = EventBus()
-        self.memory = MemoryStore(self.config.memory_path)
+        self.memory = MemoryStore(
+            self.config.memory_path,
+            max_ticks=self.config.memory_max_ticks,
+            max_signals=self.config.memory_max_signals,
+            max_decisions=self.config.memory_max_decisions,
+        )
 
         # --- integration layer ----------------------------------------
         primary = self.config.symbols[0] if self.config.symbols else "EUR/USD"

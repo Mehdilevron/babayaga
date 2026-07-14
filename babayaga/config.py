@@ -26,6 +26,11 @@ class Config:
 
     # Persistence. ":memory:" keeps everything in RAM (nothing written to disk).
     memory_path: str = ":memory:"
+    # Retention caps for the two high-volume tables so nonstop/ultra-fast runs
+    # stay memory-safe. None = unbounded. The trade ledger is never pruned.
+    memory_max_ticks: int | None = None
+    memory_max_signals: int | None = None
+    memory_max_decisions: int | None = None
 
     # Simulation defaults (used by the demo/backtest feed).
     sim_steps: int = 500
