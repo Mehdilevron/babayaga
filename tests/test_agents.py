@@ -37,6 +37,19 @@ def test_technical_agent_needs_enough_data():
     assert TechnicalAgent().evaluate("EUR/USD", _uptrend(n=5)) is None
 
 
+def test_sentiment_handles_zero_volume_bars():
+    # Real FX daily history often has no volume column; must not divide by zero.
+    from babayaga.agents.sentiment import FlowProxySentiment
+
+    bars = [
+        Candle("EUR/USD", float(i), 1.10, 1.101, 1.099, 1.1005, volume=0.0)
+        for i in range(25)
+    ]
+    score, rationale = FlowProxySentiment().score("EUR/USD", bars)
+    assert -1.0 <= score <= 1.0
+    assert rationale
+
+
 def test_sentiment_agent_neutral_source_is_flat():
     agent = SentimentAgent(source=NeutralSentiment())
     sig = agent.evaluate("EUR/USD", _uptrend())

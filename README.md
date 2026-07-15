@@ -172,6 +172,22 @@ kernel:
 
 ---
 
+## The edge test (run this before any real money)
+
+No simulator result proves an edge. The only honest test is the strategy's
+behaviour on **real historical prices**, year by year:
+
+```bash
+python3 scripts/fetch_history.py     # downloads real daily FX history (stooq.com)
+python3 -m babayaga.backtest data/*.csv
+```
+
+The report shows return, drawdown, trades and win-rate per calendar year plus a
+plain-language verdict. If the median year is ~zero or negative, the strategy
+has **no demonstrated edge** — change it and re-test; don't fund it. A
+consistently positive walk-forward is the *minimum bar* before even a demo run
+should make you optimistic.
+
 ## Testing
 
 ```bash

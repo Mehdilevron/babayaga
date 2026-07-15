@@ -50,7 +50,11 @@ class FlowProxySentiment(SentimentSource):
                 closeness.append((c.close - (c.high + c.low) / 2) / (rng / 2))
         vols = [c.volume for c in window] or [1.0]
         avg_vol = sum(vols) / len(vols)
-        weighted = sum(cl * (v / avg_vol) for cl, v in zip(closeness, vols)) / len(window)
+        if avg_vol <= 0:
+            # No volume data (common in FX daily history): weight bars equally.
+            weighted = sum(closeness) / len(window)
+        else:
+            weighted = sum(cl * (v / avg_vol) for cl, v in zip(closeness, vols)) / len(window)
         score = max(-1.0, min(1.0, weighted))
         tone = "risk-on" if score > 0 else "risk-off"
         return score, f"flow proxy {tone} ({score:+.2f})"
