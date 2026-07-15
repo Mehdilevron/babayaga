@@ -97,6 +97,40 @@ VPS. To stop it, RDP back in and press **Ctrl+C** in the Command Prompt.
 
 ---
 
+## Live config with a hard $200 stop (example: $2,000 account)
+
+This is the setup for "trade my real account, but if I'm ever down $200 total,
+flatten everything and stop until I say go again." Run it on the VPS after your
+demo results justify it:
+
+```bat
+set EXNESS_LOGIN=your-LIVE-number
+set EXNESS_PASSWORD=your-live-password
+set EXNESS_SERVER=your-live-server
+set EXNESS_SYMBOL=EUR/USD,GBP/USD,USD/JPY,AUD/USD,USD/CAD
+set MAX_LOT=0.01
+set MAX_TOTAL_LOSS=200
+set CONFIRM_LIVE=I_UNDERSTAND
+python examples\run_exness.py
+```
+
+- **`MAX_TOTAL_LOSS=200`** — the latching hard stop. The moment total loss hits
+  $200, the bot **closes every open position and stops trading**. It writes a
+  `HALTED.lock` file and **stays stopped even if it restarts or the VPS reboots**.
+- **To resume** after a hard stop (your command to start again): delete the lock
+  and relaunch.
+  ```bat
+  del HALTED.lock
+  python examples\run_exness.py
+  ```
+- `MAX_LOT=0.01` keeps every position at the minimum size.
+- `CONFIRM_LIVE=I_UNDERSTAND` is the only thing that lets it touch a real
+  account — you set it, deliberately.
+
+> Reality check on "ultra fast": real forex prints ~1 bar per minute, so faster
+> polling does not create more trades, and more trades just pay more spread. The
+> hard stop above is what actually protects the $2,000 — keep it on.
+
 ## Going live
 
 **Read this honestly.** BabaYaga's strategy has **not** been validated on real

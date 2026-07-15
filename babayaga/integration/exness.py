@@ -166,6 +166,8 @@ class ExnessMT5Broker(Broker):
         confirm_live: bool = False,
         max_lot: float | None = None,        # hard cap on lots per order
         daily_max_loss: float | None = None,  # stop opening trades after this loss
+        max_total_loss: float | None = None,  # LATCHING: hard stop for the account
+        on_halt=None,                          # callback(reason:str) when hard-stopped
     ) -> None:
         self.mt5 = mt5
         self.symbol_suffix = symbol_suffix
@@ -175,6 +177,8 @@ class ExnessMT5Broker(Broker):
         self.confirm_live = confirm_live
         self.max_lot = max_lot
         self.daily_max_loss = daily_max_loss
+        self.max_total_loss = max_total_loss
+        self.on_halt = on_halt
 
         self.positions: dict[str, Position] = {}
         self.realized_pnl = 0.0
@@ -186,11 +190,66 @@ class ExnessMT5Broker(Broker):
         self.blocked = self.is_live and not self.confirm_live
         self.refresh_account()
 
-        # Daily loss kill-switch state.
+        # Daily loss kill-switch state (auto-resets at day rollover).
         self.halted_daily = False
         self._warned_daily = False
         self._day = time.strftime("%Y-%m-%d")
         self._day_anchor_equity = self._equity
+
+        # LATCHING total-loss kill-switch. Once tripped it stays halted for the
+        # life of the process; the launcher persists it across restarts via a
+        # lock file, so it stops "until your command" to resume.
+        self.halted_total = False
+        self._warned_total = False
+        self._start_equity = self._equity
+
+    def force_halt(self, reason: str = "manual") -> None:
+        """Latch the hard stop on (e.g. a persisted lock file was found)."""
+        self.halted_total = True
+
+    def _check_total_loss(self) -> None:
+        if self.max_total_loss is None or self.halted_total:
+            return
+        loss = self._start_equity - self._equity
+        if loss >= self.max_total_loss:
+            self.halted_total = True
+            self._flatten_all()
+            if self.on_halt:
+                try:
+                    self.on_halt(f"total loss {loss:.2f} >= limit {self.max_total_loss:.2f}")
+                except Exception:  # noqa: BLE001 - never let a callback break trading halt
+                    pass
+
+    def _flatten_all(self) -> None:
+        """Close every open position (best effort) when the hard stop trips."""
+        get = getattr(self.mt5, "positions_get", None)
+        if get is None:
+            return
+        positions = get() or []
+        buy_type = getattr(self.mt5, "ORDER_TYPE_BUY", 0)
+        sell_type = getattr(self.mt5, "ORDER_TYPE_SELL", 1)
+        for p in positions:
+            vol = float(getattr(p, "volume", 0.0) or 0.0)
+            if vol <= 0:
+                continue
+            is_long = getattr(p, "type", buy_type) == buy_type
+            request = {
+                "action": getattr(self.mt5, "TRADE_ACTION_DEAL", 1),
+                "symbol": getattr(p, "symbol", ""),
+                "volume": vol,
+                "type": sell_type if is_long else buy_type,
+                "deviation": self.deviation,
+                "magic": self.magic,
+                "comment": "kill-switch flatten",
+                "type_filling": getattr(self.mt5, "ORDER_FILLING_IOC", 1),
+            }
+            ticket = getattr(p, "ticket", None)
+            if ticket is not None:
+                request["position"] = ticket  # required to close on hedging accounts
+            try:
+                self.mt5.order_send(request)
+            except Exception:  # noqa: BLE001 - close what we can
+                pass
 
     def _update_daily_guard(self) -> None:
         """Trip the kill-switch if today's loss from the day's opening equity
@@ -265,10 +324,21 @@ class ExnessMT5Broker(Broker):
                 "REAL Exness account detected and confirm_live is False — refusing "
                 "to trade. Set confirm_live=True only after your own review."
             )
-        # Daily loss kill-switch: once tripped, stop opening/adjusting positions.
-        # Existing positions keep their broker-side stop-loss/take-profit.
+        # Kill-switches. Refresh account, then evaluate both guards.
         self.refresh_account()
+        self._check_total_loss()
         self._update_daily_guard()
+        # LATCHING hard stop: closes positions once, then blocks ALL trades until
+        # the process is restarted with the lock cleared (your command to resume).
+        if self.halted_total:
+            if not self._warned_total:
+                print(
+                    f"[risk] HARD STOP: account down >= {self.max_total_loss}. "
+                    "Positions flattened; trading halted until you restart."
+                )
+                self._warned_total = True
+            return None
+        # Daily loss kill-switch: once tripped, stop opening/adjusting positions.
         if self.halted_daily:
             if not self._warned_daily:
                 print(

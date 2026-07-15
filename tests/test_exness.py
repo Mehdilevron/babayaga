@@ -44,11 +44,15 @@ class FakeMT5:
     TIMEFRAME_M1 = 1
 
     def __init__(self, trade_mode=DEMO, rates=None, order_retcode=RETCODE_DONE,
-                 balance=100.0, equity=100.0):
+                 balance=100.0, equity=100.0, positions=None):
         self._account = _account(trade_mode, balance=balance, equity=equity)
         self._rates = rates or []
         self._order_retcode = order_retcode
+        self._positions = positions or []
         self.sent_requests = []
+
+    def positions_get(self, *args, **kwargs):
+        return list(self._positions)
 
     def account_info(self):
         return self._account
@@ -193,3 +197,54 @@ def test_daily_guard_inactive_when_unset():
     # Without a configured limit, trading continues.
     assert broker.submit(Order("XAU/USD", Side.BUY, 100), mark_price=2000.0) is not None
     assert broker.halted_daily is False
+
+
+def _pos(symbol="EURUSD", volume=0.10, is_long=True, ticket=555):
+    return types.SimpleNamespace(
+        symbol=symbol, volume=volume,
+        type=FakeMT5.ORDER_TYPE_BUY if is_long else FakeMT5.ORDER_TYPE_SELL,
+        ticket=ticket,
+    )
+
+
+def test_total_loss_latching_stop_flattens_and_blocks():
+    halts = []
+    mt5 = FakeMT5(trade_mode=DEMO, balance=2000.0, equity=2000.0,
+                  positions=[_pos("EURUSD", 0.10, True, 1), _pos("GBPUSD", 0.05, False, 2)])
+    broker = ExnessMT5Broker(mt5, max_total_loss=200.0, on_halt=lambda r: halts.append(r))
+    # A first trade is fine while inside the loss budget.
+    assert broker.submit(Order("EUR/USD", Side.BUY, 100), mark_price=1.10) is not None
+    n_before = len(mt5.sent_requests)
+
+    # Account drops $250 (> $200 hard limit).
+    mt5._account.equity = 1750.0
+    blocked = broker.submit(Order("EUR/USD", Side.BUY, 100), mark_price=1.10)
+    assert blocked is None
+    assert broker.halted_total is True
+    assert halts and "total loss" in halts[0]
+    # It flattened BOTH open positions (opposite-side closes carrying the ticket).
+    flattens = [r for r in mt5.sent_requests[n_before:] if r.get("comment") == "kill-switch flatten"]
+    assert len(flattens) == 2
+    assert {f["position"] for f in flattens} == {1, 2}
+    assert flattens[0]["type"] == FakeMT5.ORDER_TYPE_SELL   # closing the long
+    assert flattens[1]["type"] == FakeMT5.ORDER_TYPE_BUY    # closing the short
+
+
+def test_total_loss_stays_latched_after_recovery():
+    mt5 = FakeMT5(trade_mode=DEMO, balance=2000.0, equity=2000.0)
+    broker = ExnessMT5Broker(mt5, max_total_loss=200.0)
+    mt5._account.equity = 1700.0
+    broker.submit(Order("EUR/USD", Side.BUY, 100), mark_price=1.10)  # trips
+    assert broker.halted_total is True
+    # Even if the account recovers, the latch stays engaged.
+    mt5._account.equity = 2100.0
+    assert broker.submit(Order("EUR/USD", Side.BUY, 100), mark_price=1.10) is None
+    assert broker.halted_total is True
+
+
+def test_force_halt_blocks_trading():
+    mt5 = FakeMT5(trade_mode=DEMO, balance=2000.0, equity=2000.0)
+    broker = ExnessMT5Broker(mt5, max_total_loss=200.0)
+    broker.force_halt("existing lock")
+    assert broker.submit(Order("EUR/USD", Side.BUY, 100), mark_price=1.10) is None
+    assert broker.halted_total is True

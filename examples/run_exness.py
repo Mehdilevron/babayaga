@@ -16,8 +16,13 @@ Configure via environment variables:
                       default "EUR/USD,GBP/USD,USD/JPY,AUD/USD,USD/CAD"
     EXNESS_SUFFIX     (optional) symbol suffix your account uses, e.g. "m" -> XAUUSDm
     MAX_LOT           (optional, recommended) hard cap on lots per order, e.g. 0.01
-    DAILY_MAX_LOSS    (optional, recommended) stop opening trades after this much
-                      loss in account currency in a day, e.g. 10
+    DAILY_MAX_LOSS    (optional) stop opening trades after this much loss in a
+                      single day (auto-resets next day), e.g. 100
+    MAX_TOTAL_LOSS    (optional, recommended) LATCHING hard stop: at this much
+                      total loss the bot flattens all positions and stops for
+                      good, staying stopped across restarts until you delete the
+                      HALTED.lock file. e.g. 200
+    HALT_LOCK         (optional) path of the hard-stop lock file (default HALTED.lock)
     CONFIRM_LIVE      must be exactly "I_UNDERSTAND" to allow a REAL account to trade
 
 SAFETY: On a REAL (live) account the broker refuses to place orders unless
@@ -66,13 +71,34 @@ def main() -> int:
 
     max_lot = os.environ.get("MAX_LOT")
     daily_max_loss = os.environ.get("DAILY_MAX_LOSS")
+    max_total_loss = os.environ.get("MAX_TOTAL_LOSS")
+
+    # Persistent hard-stop lock. If a previous session tripped the total-loss
+    # kill-switch, this file is on disk and the bot refuses to trade until you
+    # clear it (your explicit command to resume).
+    lock_path = Path(os.environ.get("HALT_LOCK", "HALTED.lock")).resolve()
+
+    def _write_halt_lock(reason: str) -> None:
+        lock_path.write_text(reason)
+        print(f"[risk] HARD STOP engaged. Lock written to {lock_path}\n"
+              f"       To resume trading later, delete that file and restart:\n"
+              f"           rm \"{lock_path}\"")
+
     broker = ExnessMT5Broker(
         mt5,
         symbol_suffix=suffix,
         confirm_live=confirm_live,
         max_lot=float(max_lot) if max_lot else None,
         daily_max_loss=float(daily_max_loss) if daily_max_loss else None,
+        max_total_loss=float(max_total_loss) if max_total_loss else None,
+        on_halt=_write_halt_lock,
     )
+    if lock_path.exists():
+        broker.force_halt("existing HALTED.lock")
+        print(f"[risk] Found {lock_path} — the hard stop is still engaged from a "
+              f"previous session. Trading is disabled.\n"
+              f"       Delete the file to resume:  rm \"{lock_path}\"")
+
     mode = "LIVE (real money)" if broker.is_live else "DEMO (virtual money)"
     if broker.is_live and not confirm_live:
         print("REAL account detected and CONFIRM_LIVE is not set — the bot will "
