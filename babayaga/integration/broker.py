@@ -50,22 +50,37 @@ class PaperBroker(Broker):
     def __init__(
         self,
         starting_cash: float = 100_000.0,
-        spread: float = 0.0001,       # quoted in price units (1 pip on EUR/USD)
+        spread: float | None = None,  # price units; None = realistic per-symbol spread
         commission_per_unit: float = 0.0,
+        slippage: float = 0.0,        # extra price units lost against the taker per fill
     ) -> None:
         self.starting_cash = starting_cash
         self.cash = starting_cash
         self.spread = spread
         self.commission_per_unit = commission_per_unit
+        self.slippage = slippage
         self.positions: dict[str, Position] = {}
         self.realized_pnl = 0.0
         self._marks: dict[str, float] = {}
         self.closed_trade_pnls: list[float] = []
 
     # -- pricing ----------------------------------------------------------
-    def _fill_price(self, side: Side, mark: float) -> float:
-        """Apply half-spread slippage against the taker."""
-        half = self.spread / 2.0
+    def _spread_for(self, symbol: str) -> float:
+        """A scalar spread if configured, else a realistic per-symbol spread.
+
+        The per-symbol default matters for multi-pair runs: USD/JPY quotes near
+        150.0 and XAU/USD near 2000.0, so charging them EUR/USD's 0.0001 would
+        make trading them essentially free — flattering every backtest.
+        """
+        if self.spread is not None:
+            return self.spread
+        from babayaga.integration.market_data import typical_spread
+
+        return typical_spread(symbol)
+
+    def _fill_price(self, symbol: str, side: Side, mark: float) -> float:
+        """Apply half-spread plus fixed slippage against the taker."""
+        half = self._spread_for(symbol) / 2.0 + self.slippage
         if side is Side.BUY:
             return mark + half
         if side is Side.SELL:
@@ -100,7 +115,7 @@ class PaperBroker(Broker):
     def submit(self, order: Order, mark_price: float) -> Fill | None:
         if order.size <= 0 or order.side is Side.FLAT:
             return None
-        fill_price = self._fill_price(order.side, mark_price)
+        fill_price = self._fill_price(order.symbol, order.side, mark_price)
         signed = order.size * order.side.sign
         pos = self.positions.setdefault(order.symbol, Position(order.symbol))
 

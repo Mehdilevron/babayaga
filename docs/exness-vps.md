@@ -110,9 +110,26 @@ set EXNESS_SERVER=your-live-server
 set EXNESS_SYMBOL=EUR/USD,GBP/USD,USD/JPY,AUD/USD,USD/CAD
 set MAX_LOT=0.01
 set MAX_TOTAL_LOSS=200
+set EQUITY_FLOOR=1800
+set FLIP_COOLDOWN=3
+set ALERT_WEBHOOK=https://hooks.slack.com/services/...   (optional halt alert)
 set CONFIRM_LIVE=I_UNDERSTAND
-python examples\run_exness.py
+scripts\run_exness_forever.bat
 ```
+
+Notes on the guards:
+
+- `EQUITY_FLOOR=1800` is the most robust stop: an absolute equity level that
+  survives crashes, restarts and reboots with zero bookkeeping.
+- `MAX_TOTAL_LOSS=200` measures from your **first** session's equity — the
+  anchor is persisted in `babayaga_state.json`, so a crash/restart does *not*
+  grant a fresh $200 budget.
+- `FLIP_COOLDOWN=3` stops bar-to-bar direction churn (every reversal pays the
+  spread twice).
+- `scripts\run_exness_forever.bat` is a watchdog: it relaunches the bot if it
+  crashes. The `HALTED.lock` is respected on every relaunch, so a hard stop
+  stays stopped.
+- `ALERT_WEBHOOK` (optional) receives a JSON POST the moment a hard stop trips.
 
 - **`MAX_TOTAL_LOSS=200`** — the latching hard stop. The moment total loss hits
   $200, the bot **closes every open position and stops trading**. It writes a
@@ -156,3 +173,19 @@ Even then, protect yourself:
 
 Nobody should treat this bot as a proven money-maker. The demo exists so you can
 find out whether it's worth anything **before** it can cost you.
+
+## Known remaining gaps between the simulator and a live account
+
+Cost realism was added to the paper broker (per-pair spreads, slippage, gaps,
+fat tails), but be aware of what is still **not** modelled — real accounts have
+all of these:
+
+- **Swap/rollover fees** for positions held overnight, and widened spreads
+  around news and the daily rollover.
+- **Cross-currency P&L conversion** (e.g. USD/JPY profits are realised in yen);
+  the paper broker books price-unit P&L directly in account currency.
+- **Margin, stop-out and leverage rules** of your specific Exness account type.
+- **Requotes/partial fills under fast markets** beyond the simple IOC model.
+- Above all: **the simulator's price generator has built-in regime drift the
+  strategy can ride.** Profits on it are a property of the toy market, not
+  evidence of real-world edge. Only the demo (real prices) can tell you that.

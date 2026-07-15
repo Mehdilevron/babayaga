@@ -69,11 +69,19 @@ class SimulatedFeed(MarketDataFeed):
         seed: int | None = 7,
         annualized_vol: float = 0.08,
         interval: float = 0.0,
+        gap_prob: float = 0.01,       # chance a bar opens away from the prior close
+        gap_scale: float = 8.0,       # gap size in units of per-bar sigma
+        fat_tail_prob: float = 0.02,  # chance of an outsized shock (news-like bar)
+        fat_tail_mult: float = 4.0,
     ) -> None:
         self.symbol = symbol
         self.start_price = start_price
         self.steps = steps
         self.interval = interval
+        self.gap_prob = gap_prob
+        self.gap_scale = gap_scale
+        self.fat_tail_prob = fat_tail_prob
+        self.fat_tail_mult = fat_tail_mult
         self._rng = random.Random(seed)
         # Per-bar volatility from an annualised figure (~252*24 hourly bars).
         self._sigma = annualized_vol / math.sqrt(252 * 24)
@@ -93,7 +101,15 @@ class SimulatedFeed(MarketDataFeed):
                 regime_len = self._rng.randint(15, 60)
             regime_len -= 1
 
+            # Occasional gap: the bar opens away from the prior close, the way
+            # real markets jump on news or across weekends. Stops can be jumped.
+            if self._rng.random() < self.gap_prob:
+                price *= 1.0 + self._rng.gauss(0.0, self._sigma * self.gap_scale)
+
             shock = self._rng.gauss(0.0, 1.0) * self._sigma
+            # Fat tails: a small fraction of bars carry news-sized moves.
+            if self._rng.random() < self.fat_tail_prob:
+                shock *= self.fat_tail_mult
             ret = drift + shock
             open_ = price
             close = price * (1.0 + ret)

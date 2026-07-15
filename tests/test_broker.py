@@ -58,6 +58,25 @@ def test_take_profit_triggers_exit():
     assert b.realized_pnl > 0
 
 
+def test_per_symbol_spread_used_when_unset():
+    # spread=None -> realistic per-symbol spreads: USD/JPY (~150.0) must not be
+    # charged EUR/USD's 0.0001.
+    b = PaperBroker(starting_cash=100_000, spread=None)
+    jpy = b.submit(Order("USD/JPY", Side.BUY, 1000), mark_price=150.0)
+    eur = b.submit(Order("EUR/USD", Side.BUY, 1000), mark_price=1.1000)
+    assert jpy is not None and eur is not None
+    assert round(jpy.price - 150.0, 6) == 0.005     # half of 0.010
+    assert round(eur.price - 1.1000, 6) == 0.00004  # half of 0.00008
+
+
+def test_slippage_applied_against_taker():
+    b = PaperBroker(starting_cash=100_000, spread=0.0, slippage=0.0001)
+    buy = b.submit(Order("EUR/USD", Side.BUY, 1000), mark_price=1.2000)
+    sell = b.submit(Order("EUR/USD", Side.SELL, 1000), mark_price=1.2000)
+    assert buy is not None and round(buy.price, 6) == 1.2001
+    assert sell is not None and round(sell.price, 6) == 1.1999
+
+
 def test_averaging_up_updates_avg_price():
     b = PaperBroker(starting_cash=100_000, spread=0.0)
     b.submit(Order("EUR/USD", Side.BUY, 10_000), mark_price=1.1000)

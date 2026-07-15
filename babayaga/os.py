@@ -30,7 +30,6 @@ from babayaga.integration.market_data import (
     MarketDataFeed,
     SimulatedFeed,
     typical_price,
-    typical_spread,
 )
 from babayaga.kernel.bus import EventBus
 from babayaga.kernel.events import (
@@ -59,15 +58,11 @@ class TradingOS:
         )
 
         # --- integration layer ----------------------------------------
-        primary = self.config.symbols[0] if self.config.symbols else "EUR/USD"
-        spread = (
-            self.config.spread
-            if self.config.spread is not None
-            else typical_spread(primary)
-        )
+        # spread=None lets the paper broker charge a realistic spread per
+        # symbol (crucial for multi-pair runs).
         self.broker = PaperBroker(
             starting_cash=self.config.starting_cash,
-            spread=spread,
+            spread=self.config.spread,
             commission_per_unit=self.config.commission_per_unit,
         )
 
@@ -75,7 +70,9 @@ class TradingOS:
         self.risk = RiskAgent(self.config.risk)
         specialists = [TechnicalAgent(), SentimentAgent()]
         self.coordinator = Coordinator(specialists, self.risk)
-        self.execution = ExecutionAgent(self.broker)
+        self.execution = ExecutionAgent(
+            self.broker, min_flip_bars=self.config.flip_cooldown_bars
+        )
 
         # --- runtime state --------------------------------------------
         self._windows: dict[str, deque[Candle]] = defaultdict(

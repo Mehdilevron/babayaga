@@ -74,6 +74,57 @@ def test_risk_drawdown_breaker_halts_trading():
     assert "HALT" in d.rationale
 
 
+def test_execution_flip_cooldown_blocks_rapid_reversals():
+    from babayaga.agents.execution import ExecutionAgent
+    from babayaga.integration.broker import PaperBroker
+    from babayaga.kernel.events import Decision
+
+    broker = PaperBroker(starting_cash=100_000, spread=0.0)
+    ex = ExecutionAgent(broker, min_flip_bars=3)
+    buy = Decision("EUR/USD", Side.BUY, 1000, 0.5, "t")
+    sell = Decision("EUR/USD", Side.SELL, 1000, 0.5, "t")
+
+    assert len(ex.execute(buy, 0, 1.10)) == 1        # bar 1: open long
+    assert ex.execute(sell, 1000, 1.10) == []        # bar 2: reversal blocked
+    assert ex.execute(sell, 1000, 1.10) == []        # bar 3: still blocked
+    fills = ex.execute(sell, 1000, 1.10)             # bar 4: cooldown elapsed
+    assert len(fills) == 2                            # close + open short
+
+
+def test_execution_cooldown_never_blocks_closing_to_flat():
+    from babayaga.agents.execution import ExecutionAgent
+    from babayaga.integration.broker import PaperBroker
+    from babayaga.kernel.events import Decision
+
+    broker = PaperBroker(starting_cash=100_000, spread=0.0)
+    ex = ExecutionAgent(broker, min_flip_bars=10)
+    buy = Decision("EUR/USD", Side.BUY, 1000, 0.5, "t")
+    flat = Decision("EUR/USD", Side.FLAT, 0.0, 0.0, "risk off")
+    ex.execute(buy, 0, 1.10)
+    fills = ex.execute(flat, 1000, 1.10)  # next bar: close is always allowed
+    assert len(fills) == 1
+
+
+def test_simulated_feed_gaps_and_determinism():
+    import asyncio
+
+    from babayaga.integration.market_data import SimulatedFeed
+
+    async def closes(feed, n):
+        out = []
+        async for c in feed.stream():
+            out.append((c.open, c.close))
+            if len(out) >= n:
+                break
+        return out
+
+    a = asyncio.run(closes(SimulatedFeed(steps=0, seed=9, gap_prob=0.05), 1500))
+    b = asyncio.run(closes(SimulatedFeed(steps=0, seed=9, gap_prob=0.05), 1500))
+    assert a == b  # deterministic for a given seed
+    gaps = [abs(a[i][0] - a[i - 1][1]) for i in range(1, len(a))]
+    assert any(g > 1e-12 for g in gaps)  # some bars open away from prior close
+
+
 def test_coordinator_fuses_agreeing_specialists():
     specialists = [TechnicalAgent(), SentimentAgent()]
     coord = Coordinator(specialists, RiskAgent(RiskLimits(min_confidence=0.0)))

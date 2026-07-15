@@ -248,3 +248,72 @@ def test_force_halt_blocks_trading():
     broker.force_halt("existing lock")
     assert broker.submit(Order("EUR/USD", Side.BUY, 100), mark_price=1.10) is None
     assert broker.halted_total is True
+
+
+def test_symbol_roundtrip_with_suffix():
+    from babayaga.integration.exness import from_mt5_symbol
+
+    assert from_mt5_symbol("EURUSDm", "m") == "EUR/USD"
+    assert from_mt5_symbol("XAUUSD") == "XAU/USD"
+    assert from_mt5_symbol(to_mt5_symbol("GBP/JPY", "z"), "z") == "GBP/JPY"
+
+
+def test_below_min_lot_is_vetoed_not_rounded_up():
+    mt5 = FakeMT5(trade_mode=DEMO)
+    broker = ExnessMT5Broker(mt5)
+    # 0.4 units / contract 100 = 0.004 lots < volume_min 0.01 -> skip, no order.
+    assert broker.submit(Order("XAU/USD", Side.BUY, 0.4), mark_price=2000.0) is None
+    assert mt5.sent_requests == []
+
+
+def test_equity_floor_latches_hard_stop():
+    halts = []
+    mt5 = FakeMT5(trade_mode=DEMO, balance=2000.0, equity=2000.0)
+    broker = ExnessMT5Broker(mt5, equity_floor=1800.0, on_halt=lambda r: halts.append(r))
+    assert broker.submit(Order("EUR/USD", Side.BUY, 100), mark_price=1.10) is not None
+    mt5._account.equity = 1799.0
+    assert broker.submit(Order("EUR/USD", Side.BUY, 100), mark_price=1.10) is None
+    assert broker.halted_total is True
+    assert halts and "floor" in halts[0]
+
+
+def test_loss_anchor_survives_restart():
+    # Simulates a crash-restart: the account already lost $150; the new process
+    # is told the ORIGINAL anchor, so only $50 of budget remains.
+    mt5 = FakeMT5(trade_mode=DEMO, balance=1850.0, equity=1850.0)
+    broker = ExnessMT5Broker(mt5, max_total_loss=200.0, loss_anchor_equity=2000.0)
+    assert broker.submit(Order("EUR/USD", Side.BUY, 100), mark_price=1.10) is not None
+    mt5._account.equity = 1795.0  # total loss from anchor = 205 >= 200
+    assert broker.submit(Order("EUR/USD", Side.BUY, 100), mark_price=1.10) is None
+    assert broker.halted_total is True
+
+
+def test_guards_run_on_mark_to_market_not_only_submit():
+    # A halt must trigger while merely holding positions, without a new order.
+    mt5 = FakeMT5(trade_mode=DEMO, balance=2000.0, equity=2000.0,
+                  positions=[_pos("EURUSD", 0.10, True, 9)])
+    broker = ExnessMT5Broker(mt5, max_total_loss=200.0, reconcile_interval=0.0)
+    mt5._account.equity = 1750.0
+    broker.mark_to_market("EUR/USD", 1.10)
+    assert broker.halted_total is True
+    flattens = [r for r in mt5.sent_requests if r.get("comment") == "kill-switch flatten"]
+    assert len(flattens) == 1 and flattens[0]["position"] == 9
+
+
+def test_sync_positions_mirrors_server_state():
+    # Server has one long EURUSD position; contract size 100 (FakeMT5 default).
+    mt5 = FakeMT5(trade_mode=DEMO, positions=[_pos("EURUSD", 0.10, True, 4)])
+    broker = ExnessMT5Broker(mt5, reconcile_interval=0.0)
+    broker.mark_to_market("EUR/USD", 1.10)
+    assert broker.positions["EUR/USD"].size == 10.0  # 0.10 lot * 100 contract
+    # Server-side close (e.g. take-profit filled on the server): mirror empties.
+    mt5._positions = []
+    broker.mark_to_market("EUR/USD", 1.10)
+    assert broker.open_position_count() == 0
+
+
+def test_filling_mode_respects_symbol_capabilities():
+    mt5 = FakeMT5(trade_mode=DEMO)
+    broker = ExnessMT5Broker(mt5)
+    # FakeMT5 symbol_info has no filling_mode attr -> default IOC.
+    assert broker._filling_mode("EURUSD") == FakeMT5.ORDER_FILLING_IOC

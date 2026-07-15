@@ -21,8 +21,18 @@ Configure via environment variables:
     MAX_TOTAL_LOSS    (optional, recommended) LATCHING hard stop: at this much
                       total loss the bot flattens all positions and stops for
                       good, staying stopped across restarts until you delete the
-                      HALTED.lock file. e.g. 200
+                      HALTED.lock file. e.g. 200. The loss is measured from the
+                      first session's equity (persisted in STATE_FILE), so a
+                      crash/restart does not grant a fresh budget.
+    EQUITY_FLOOR      (optional, recommended) LATCHING hard stop at an absolute
+                      equity level, e.g. 1800 for a $2000 account. Simplest and
+                      most robust guard — survives anything.
+    FLIP_COOLDOWN     (optional) min bars between direction changes per pair
+                      (default 3). Cuts spread-bleed from churn.
+    ALERT_WEBHOOK     (optional) URL that receives a JSON {"text": ...} POST
+                      when a hard stop trips (Slack/Discord webhook, etc.)
     HALT_LOCK         (optional) path of the hard-stop lock file (default HALTED.lock)
+    STATE_FILE        (optional) path of the loss-anchor file (default babayaga_state.json)
     CONFIRM_LIVE      must be exactly "I_UNDERSTAND" to allow a REAL account to trade
 
 SAFETY: On a REAL (live) account the broker refuses to place orders unless
@@ -33,9 +43,11 @@ demo for a good while before you even consider anything else.
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import sys
 import threading
+import urllib.request
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -72,17 +84,48 @@ def main() -> int:
     max_lot = os.environ.get("MAX_LOT")
     daily_max_loss = os.environ.get("DAILY_MAX_LOSS")
     max_total_loss = os.environ.get("MAX_TOTAL_LOSS")
+    equity_floor = os.environ.get("EQUITY_FLOOR")
 
     # Persistent hard-stop lock. If a previous session tripped the total-loss
     # kill-switch, this file is on disk and the bot refuses to trade until you
     # clear it (your explicit command to resume).
     lock_path = Path(os.environ.get("HALT_LOCK", "HALTED.lock")).resolve()
+    # Loss-anchor state: remembers the equity the loss budget is measured from,
+    # so a crash/restart does NOT grant a fresh MAX_TOTAL_LOSS budget.
+    state_path = Path(os.environ.get("STATE_FILE", "babayaga_state.json")).resolve()
+
+    def _alert(text: str) -> None:
+        """POST a JSON alert to ALERT_WEBHOOK (Slack/Discord/Telegram-style)."""
+        url = os.environ.get("ALERT_WEBHOOK")
+        if not url:
+            return
+        try:
+            req = urllib.request.Request(
+                url,
+                data=json.dumps({"text": text}).encode(),
+                headers={"Content-Type": "application/json"},
+            )
+            urllib.request.urlopen(req, timeout=10)  # noqa: S310
+        except Exception as exc:  # noqa: BLE001 - alerting must never break the halt
+            print(f"[alert] webhook failed: {exc}")
 
     def _write_halt_lock(reason: str) -> None:
         lock_path.write_text(reason)
-        print(f"[risk] HARD STOP engaged. Lock written to {lock_path}\n"
+        # Reset the loss anchor: after YOU choose to resume, the next session
+        # measures its fresh budget from the equity it starts with.
+        state_path.unlink(missing_ok=True)
+        print(f"[risk] HARD STOP engaged ({reason}). Lock written to {lock_path}\n"
               f"       To resume trading later, delete that file and restart:\n"
-              f"           rm \"{lock_path}\"")
+              f"           del \"{lock_path}\"")
+        _alert(f"BabaYaga HARD STOP: {reason}. Trading halted until {lock_path.name} is deleted.")
+
+    anchor = None
+    if state_path.exists():
+        try:
+            anchor = float(json.loads(state_path.read_text())["anchor_equity"])
+            print(f"Resuming loss budget from anchor equity {anchor:.2f} ({state_path.name})")
+        except (ValueError, KeyError, json.JSONDecodeError):
+            anchor = None
 
     broker = ExnessMT5Broker(
         mt5,
@@ -91,8 +134,12 @@ def main() -> int:
         max_lot=float(max_lot) if max_lot else None,
         daily_max_loss=float(daily_max_loss) if daily_max_loss else None,
         max_total_loss=float(max_total_loss) if max_total_loss else None,
+        equity_floor=float(equity_floor) if equity_floor else None,
+        loss_anchor_equity=anchor,
         on_halt=_write_halt_lock,
     )
+    if anchor is None and (max_total_loss or equity_floor):
+        state_path.write_text(json.dumps({"anchor_equity": broker.equity}))
     if lock_path.exists():
         broker.force_halt("existing HALTED.lock")
         print(f"[risk] Found {lock_path} — the hard stop is still engaged from a "
@@ -108,7 +155,13 @@ def main() -> int:
     print(f"Balance: {broker.cash:.2f}   Equity: {broker.equity:.2f}")
 
     # sim_steps=0 => no simulated feed; we attach a real Exness feed per pair.
-    os_ = TradingOS(Config(symbols=symbols, sim_steps=0))
+    # flip_cooldown_bars: on a real account every reversal pays the spread, so
+    # rate-limit direction changes (default 3 bars; FLIP_COOLDOWN=0 disables).
+    os_ = TradingOS(Config(
+        symbols=symbols,
+        sim_steps=0,
+        flip_cooldown_bars=int(os.environ.get("FLIP_COOLDOWN", "3")),
+    ))
     os_.broker = broker
     os_.execution.broker = broker
     for sym in symbols:

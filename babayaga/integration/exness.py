@@ -39,6 +39,16 @@ def to_mt5_symbol(symbol: str, suffix: str = "") -> str:
     return symbol.replace("/", "").upper() + suffix
 
 
+def from_mt5_symbol(mt5_symbol: str, suffix: str = "") -> str:
+    """``EURUSDm`` (suffix ``m``) -> ``EUR/USD``. Inverse of :func:`to_mt5_symbol`."""
+    base = mt5_symbol
+    if suffix and base.endswith(suffix):
+        base = base[: -len(suffix)]
+    if len(base) >= 6:
+        return f"{base[:-3]}/{base[-3:]}".upper()
+    return base.upper()
+
+
 def load_mt5():  # pragma: no cover - environment dependent
     """Import the Windows-only MetaTrader5 package, with a helpful error."""
     try:
@@ -167,6 +177,9 @@ class ExnessMT5Broker(Broker):
         max_lot: float | None = None,        # hard cap on lots per order
         daily_max_loss: float | None = None,  # stop opening trades after this loss
         max_total_loss: float | None = None,  # LATCHING: hard stop for the account
+        equity_floor: float | None = None,    # LATCHING: hard stop at this equity
+        loss_anchor_equity: float | None = None,  # measure max_total_loss from here
+        reconcile_interval: float = 10.0,     # seconds between position syncs
         on_halt=None,                          # callback(reason:str) when hard-stopped
     ) -> None:
         self.mt5 = mt5
@@ -178,6 +191,8 @@ class ExnessMT5Broker(Broker):
         self.max_lot = max_lot
         self.daily_max_loss = daily_max_loss
         self.max_total_loss = max_total_loss
+        self.equity_floor = equity_floor
+        self.reconcile_interval = reconcile_interval
         self.on_halt = on_halt
 
         self.positions: dict[str, Position] = {}
@@ -199,26 +214,40 @@ class ExnessMT5Broker(Broker):
         # LATCHING total-loss kill-switch. Once tripped it stays halted for the
         # life of the process; the launcher persists it across restarts via a
         # lock file, so it stops "until your command" to resume.
+        # ``loss_anchor_equity`` lets the launcher persist the ORIGINAL starting
+        # equity across crash-restarts — otherwise each restart would grant a
+        # fresh loss budget (lose $150, crash, lose $200 more...).
         self.halted_total = False
         self._warned_total = False
-        self._start_equity = self._equity
+        self._start_equity = (
+            loss_anchor_equity if loss_anchor_equity is not None else self._equity
+        )
+        self._last_reconcile = 0.0
 
     def force_halt(self, reason: str = "manual") -> None:
         """Latch the hard stop on (e.g. a persisted lock file was found)."""
         self.halted_total = True
 
     def _check_total_loss(self) -> None:
-        if self.max_total_loss is None or self.halted_total:
+        if self.halted_total:
             return
-        loss = self._start_equity - self._equity
-        if loss >= self.max_total_loss:
-            self.halted_total = True
-            self._flatten_all()
-            if self.on_halt:
-                try:
-                    self.on_halt(f"total loss {loss:.2f} >= limit {self.max_total_loss:.2f}")
-                except Exception:  # noqa: BLE001 - never let a callback break trading halt
-                    pass
+        reason = None
+        if self.max_total_loss is not None:
+            loss = self._start_equity - self._equity
+            if loss >= self.max_total_loss:
+                reason = f"total loss {loss:.2f} >= limit {self.max_total_loss:.2f}"
+        if reason is None and self.equity_floor is not None:
+            if self._equity <= self.equity_floor:
+                reason = f"equity {self._equity:.2f} <= floor {self.equity_floor:.2f}"
+        if reason is None:
+            return
+        self.halted_total = True
+        self._flatten_all()
+        if self.on_halt:
+            try:
+                self.on_halt(reason)
+            except Exception:  # noqa: BLE001 - never let a callback break trading halt
+                pass
 
     def _flatten_all(self) -> None:
         """Close every open position (best effort) when the hard stop trips."""
@@ -295,8 +324,56 @@ class ExnessMT5Broker(Broker):
         return sum(1 for p in self.positions.values() if p.size != 0)
 
     def mark_to_market(self, symbol: str, price: float) -> None:
-        # Positions/P&L are authoritative on the server; refresh periodically.
+        # Positions/P&L are authoritative on the server. Refresh the account and
+        # run the kill-switches on EVERY price update — a halt must trigger while
+        # holding a loser, not only when the strategy next submits an order.
         self.refresh_account()
+        now = time.time()
+        if now - self._last_reconcile >= self.reconcile_interval:
+            self._last_reconcile = now
+            self.sync_positions()
+        self._check_total_loss()
+        self._update_daily_guard()
+
+    def sync_positions(self) -> None:
+        """Mirror the server's open positions into ``self.positions``.
+
+        The server is the source of truth: positions can be closed out from
+        under us (stop-loss/take-profit filled server-side, margin stop-out, a
+        manual close in the MT5 app). Without this sync the execution agent
+        would keep acting on stale ``current_units``.
+        """
+        get = getattr(self.mt5, "positions_get", None)
+        if get is None:
+            return
+        server = get()
+        if server is None:  # transient terminal error — keep the last mirror
+            return
+        fresh: dict[str, Position] = {}
+        buy_type = getattr(self.mt5, "ORDER_TYPE_BUY", 0)
+        for p in server:
+            raw = getattr(p, "symbol", "")
+            vol = float(getattr(p, "volume", 0.0) or 0.0)
+            if not raw or vol <= 0:
+                continue
+            sym = from_mt5_symbol(raw, self.symbol_suffix)
+            info = getattr(self.mt5, "symbol_info", lambda *_: None)(raw)
+            contract = self.units_per_lot
+            if info is not None:
+                contract = float(
+                    getattr(info, "trade_contract_size", contract) or contract
+                )
+            signed = vol * contract * (1 if getattr(p, "type", buy_type) == buy_type else -1)
+            open_price = float(getattr(p, "price_open", 0.0) or 0.0)
+            pos = fresh.setdefault(sym, Position(sym))
+            prev = pos.size
+            total = prev + signed
+            if total != 0:
+                pos.avg_price = (
+                    pos.avg_price * abs(prev) + open_price * abs(signed)
+                ) / (abs(prev) + abs(signed))
+            pos.size = total
+        self.positions = fresh
 
     # -- sizing -----------------------------------------------------------
     def _units_to_lots(self, symbol_mt5: str, units: float) -> float:
@@ -312,8 +389,32 @@ class ExnessMT5Broker(Broker):
             lots = min(lots, self.max_lot)
         if vol_step > 0:
             lots = math.floor(lots / vol_step) * vol_step
-        lots = max(vol_min, min(vol_max, lots))
-        return round(lots, 2)
+        # VETO instead of rounding up: if the correctly-sized position is below
+        # the venue minimum, taking vol_min anyway would multiply the intended
+        # risk (e.g. 10x on a small account). Better to skip the trade.
+        if lots < vol_min:
+            return 0.0
+        return round(min(vol_max, lots), 2)
+
+    def _filling_mode(self, symbol_mt5: str) -> int:
+        """Pick an order filling mode the venue actually allows.
+
+        MT5 symbols advertise allowed modes as a bitmask (1=FOK, 2=IOC); using a
+        disallowed mode gets orders rejected with TRADE_RETCODE_INVALID_FILL.
+        Prefer IOC, fall back to FOK, then RETURN.
+        """
+        ioc = getattr(self.mt5, "ORDER_FILLING_IOC", 1)
+        fok = getattr(self.mt5, "ORDER_FILLING_FOK", 0)
+        ret = getattr(self.mt5, "ORDER_FILLING_RETURN", 2)
+        info = getattr(self.mt5, "symbol_info", lambda *_: None)(symbol_mt5)
+        mask = getattr(info, "filling_mode", None) if info is not None else None
+        if mask is None:
+            return ioc
+        if mask & 2:
+            return ioc
+        if mask & 1:
+            return fok
+        return ret
 
     # -- orders -----------------------------------------------------------
     def submit(self, order: Order, mark_price: float) -> Fill | None:
@@ -349,6 +450,10 @@ class ExnessMT5Broker(Broker):
             return None
         sym = to_mt5_symbol(order.symbol, self.symbol_suffix)
         lots = self._units_to_lots(sym, order.size)
+        if lots <= 0:
+            # Correctly-sized position is below the venue minimum — skip rather
+            # than force a bigger position than the risk model asked for.
+            return None
 
         buy_type = getattr(self.mt5, "ORDER_TYPE_BUY", 0)
         sell_type = getattr(self.mt5, "ORDER_TYPE_SELL", 1)
@@ -362,7 +467,7 @@ class ExnessMT5Broker(Broker):
             "magic": self.magic,
             "comment": (order.reason or "babayaga")[:31],
             "type_time": getattr(self.mt5, "ORDER_TIME_GTC", 0),
-            "type_filling": getattr(self.mt5, "ORDER_FILLING_IOC", 1),
+            "type_filling": self._filling_mode(sym),
         }
         if order.stop_loss is not None:
             request["sl"] = float(order.stop_loss)
@@ -377,7 +482,13 @@ class ExnessMT5Broker(Broker):
 
         fill_price = float(getattr(result, "price", mark_price) or mark_price)
         filled_lots = float(getattr(result, "volume", lots) or lots)
-        filled_units = filled_lots * self.units_per_lot * order.side.sign
+        # Convert lots back to units with the SYMBOL's contract size (an FX lot
+        # is 100,000 units, a gold lot is 100 oz) — not a one-size scalar.
+        contract = self.units_per_lot
+        info = getattr(self.mt5, "symbol_info", lambda *_: None)(sym)
+        if info is not None:
+            contract = float(getattr(info, "trade_contract_size", contract) or contract)
+        filled_units = filled_lots * contract * order.side.sign
         self._apply_fill(order.symbol, filled_units, fill_price)
         self.refresh_account()
         return Fill(

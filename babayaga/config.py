@@ -21,6 +21,10 @@ class Config:
     # Data window each agent sees.
     history_window: int = 250
 
+    # Minimum bars between direction changes per symbol (0 = off). Cuts the
+    # spread-bleed from bar-to-bar reversals on real accounts.
+    flip_cooldown_bars: int = 0
+
     # Risk configuration.
     risk: RiskLimits = field(default_factory=RiskLimits)
 
