@@ -64,6 +64,7 @@ class TradingOS:
             starting_cash=self.config.starting_cash,
             spread=self.config.spread,
             commission_per_unit=self.config.commission_per_unit,
+            slippage=self.config.slippage,
         )
 
         # --- agent workflow -------------------------------------------
@@ -175,6 +176,7 @@ class TradingOS:
                         steps=self.config.sim_steps,
                         seed=seed,
                         interval=self.config.sim_interval,
+                        drift_scale=self.config.sim_drift_scale,
                     ),
                 )
 

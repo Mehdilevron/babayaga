@@ -337,6 +337,8 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="SQLite path for persistent memory (e.g. babayaga.sqlite), or :memory:")
     p.add_argument("--max-ticks", type=int, default=100_000, dest="max_ticks",
                    help="cap on retained ticks/signals for nonstop runs; trades are never pruned")
+    p.add_argument("--realistic", action="store_true",
+                   help="~real-account mode: real spreads + slippage, weak drift, flip cooldown")
     return p
 
 
@@ -345,6 +347,10 @@ def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(message)s")
 
     symbols = tuple(s.strip() for s in args.symbol.split(",") if s.strip())
+    # Realistic mode makes the simulator behave ~like a real account: realistic
+    # per-pair spreads (already default), added slippage, weak trend (drift), and
+    # a flip cooldown so every reversal isn't free. Expect a far soberer curve.
+    realistic = getattr(args, "realistic", False)
     cfg = Config(
         symbols=symbols,
         starting_cash=args.cash,
@@ -357,7 +363,13 @@ def main(argv: list[str] | None = None) -> int:
         memory_max_ticks=args.max_ticks,
         memory_max_signals=args.max_ticks,
         memory_max_decisions=args.max_ticks,
+        slippage=0.00003 if realistic else 0.0,
+        sim_drift_scale=0.2 if realistic else 1.0,
+        flip_cooldown_bars=3 if realistic else 0,
     )
+    if realistic:
+        print("REALISTIC MODE: real spreads + slippage, weak drift, flip cooldown. "
+              "This is much closer to a real account than the default demo.")
     os_ = TradingOS(cfg)
     dash = Dashboard(os_, host=args.host, port=args.port)
     dash.serve_forever_in_thread()

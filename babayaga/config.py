@@ -17,6 +17,9 @@ class Config:
     # Spread in price units. None -> pick a realistic value for the first symbol.
     spread: float | None = None
     commission_per_unit: float = 0.0
+    # Extra price units lost against the taker on every fill (models the slippage
+    # a real account eats beyond the quoted spread).
+    slippage: float = 0.0
 
     # Data window each agent sees.
     history_window: int = 250
@@ -42,6 +45,10 @@ class Config:
     # Starting price for the simulated feed. None -> a realistic price per symbol.
     sim_start_price: float | None = None
     sim_interval: float = 0.0        # seconds between simulated bars (>0 for live UIs)
+    # Scales the simulator's built-in regime drift. 1.0 = trend-friendly (easy
+    # mode). Near 0 = almost a pure random walk, which is far closer to what an
+    # unvalidated strategy actually faces on a real account.
+    sim_drift_scale: float = 1.0
 
     # Safety switch. The OS is paper-only; this must stay False unless you have
     # implemented and vetted a real broker adapter yourself.

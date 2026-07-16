@@ -73,6 +73,7 @@ class SimulatedFeed(MarketDataFeed):
         gap_scale: float = 8.0,       # gap size in units of per-bar sigma
         fat_tail_prob: float = 0.02,  # chance of an outsized shock (news-like bar)
         fat_tail_mult: float = 4.0,
+        drift_scale: float = 1.0,     # scales regime drift; ~0 = near random walk
     ) -> None:
         self.symbol = symbol
         self.start_price = start_price
@@ -82,6 +83,7 @@ class SimulatedFeed(MarketDataFeed):
         self.gap_scale = gap_scale
         self.fat_tail_prob = fat_tail_prob
         self.fat_tail_mult = fat_tail_mult
+        self.drift_scale = drift_scale
         self._rng = random.Random(seed)
         # Per-bar volatility from an annualised figure (~252*24 hourly bars).
         self._sigma = annualized_vol / math.sqrt(252 * 24)
@@ -97,7 +99,7 @@ class SimulatedFeed(MarketDataFeed):
             i += 1
             if regime_len <= 0:
                 # Switch regime: pick a fresh drift and duration.
-                drift = self._rng.uniform(-1.0, 1.0) * self._sigma * 0.5
+                drift = self._rng.uniform(-1.0, 1.0) * self._sigma * 0.5 * self.drift_scale
                 regime_len = self._rng.randint(15, 60)
             regime_len -= 1
 
