@@ -368,8 +368,11 @@ def main(argv: list[str] | None = None) -> int:
         flip_cooldown_bars=3 if realistic else 0,
     )
     if realistic:
-        print("REALISTIC MODE: real spreads + slippage, weak drift, flip cooldown. "
-              "This is much closer to a real account than the default demo.")
+        # Regime filter: only trade genuine trends (measured A/B to roughly
+        # halve losses vs trading everything). Still not an edge on its own.
+        cfg.risk.min_trend_strength = 1.0
+        print("REALISTIC MODE: real spreads + slippage, weak drift, flip cooldown, "
+              "regime filter. This is much closer to a real account than the demo.")
     os_ = TradingOS(cfg)
     dash = Dashboard(os_, host=args.host, port=args.port)
     dash.serve_forever_in_thread()

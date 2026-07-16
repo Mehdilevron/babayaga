@@ -32,6 +32,13 @@ class RiskLimits:
     max_drawdown_pct: float = 20.0      # halt new risk beyond this DD from peak
     min_confidence: float = 0.15
     max_units: float = 1_000_000.0
+    # Regime filter: require a real trend before trading. Measured as the EMA
+    # fast/slow separation in units of ATR. 0.0 = off (trade everything). A
+    # value like 0.5 means "only trade when the trend is at least half an ATR
+    # of separation" — i.e. sit out the chop where trend-followers bleed.
+    min_trend_strength: float = 0.0
+    trend_fast: int = 12
+    trend_slow: int = 26
 
 
 class RiskAgent:
@@ -83,6 +90,25 @@ class RiskAgent:
         atr = ind.atr(highs, lows, closes, self.limits.atr_period)
         if atr is None or atr <= 0:
             return flat("ATR unavailable — cannot size stop")
+
+        # Regime filter: only trade when a genuine trend exists. Trend-followers
+        # lose money getting whipsawed in chop while paying the spread; this
+        # keeps them flat unless the EMAs have separated by a real margin.
+        if self.limits.min_trend_strength > 0:
+            fast = ind.ema(closes, self.limits.trend_fast)
+            slow = ind.ema(closes, self.limits.trend_slow)
+            if fast is None or slow is None:
+                return flat("trend filter: not enough data")
+            strength = abs(fast - slow) / atr
+            if strength < self.limits.min_trend_strength:
+                return flat(
+                    f"regime filter: chop (trend {strength:.2f} < "
+                    f"{self.limits.min_trend_strength:.2f} ATR)"
+                )
+            # Only trade WITH the higher-level trend, never against it.
+            trend_side = Side.BUY if fast > slow else Side.SELL
+            if raw_side is not trend_side:
+                return flat("regime filter: signal against the prevailing trend")
 
         stop_dist = self.limits.atr_stop_mult * atr
         target_dist = self.limits.atr_target_mult * atr

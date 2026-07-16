@@ -68,6 +68,36 @@ def test_risk_agent_sizes_by_fractional_risk():
     assert d.take_profit is not None and d.take_profit > hist[-1].close
 
 
+def test_regime_filter_vetoes_chop_and_counter_trend():
+    risk = RiskAgent(RiskLimits(min_confidence=0.0, min_trend_strength=1.0))
+    up = _uptrend()  # strong uptrend: fast EMA well above slow
+
+    # With the trend, a BUY is allowed.
+    d = risk.assess("EUR/USD", Side.BUY, 1.0, "t", up, 100_000, 0)
+    assert d.side is Side.BUY and d.size > 0
+
+    # Against the trend, a SELL is vetoed even at full confidence.
+    d2 = risk.assess("EUR/USD", Side.SELL, 1.0, "t", up, 100_000, 0)
+    assert d2.side is Side.FLAT
+    assert "trend" in d2.rationale
+
+    # In flat/choppy data the EMAs sit on top of each other -> no trade.
+    flat = [
+        Candle("EUR/USD", float(i), 1.10, 1.1005, 1.0995, 1.10, 1000)
+        for i in range(80)
+    ]
+    d3 = risk.assess("EUR/USD", Side.BUY, 1.0, "t", flat, 100_000, 0)
+    assert d3.side is Side.FLAT
+    assert "chop" in d3.rationale
+
+
+def test_regime_filter_off_by_default():
+    # Default limits keep the filter disabled (min_trend_strength=0.0).
+    risk = RiskAgent(RiskLimits(min_confidence=0.0))
+    d = risk.assess("EUR/USD", Side.SELL, 1.0, "t", _uptrend(), 100_000, 0)
+    assert d.side is Side.SELL  # counter-trend allowed when filter is off
+
+
 def test_risk_agent_vetoes_low_confidence():
     risk = RiskAgent(RiskLimits(min_confidence=0.5))
     d = risk.assess("EUR/USD", Side.BUY, confidence=0.1, rationale="weak",

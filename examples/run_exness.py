@@ -157,11 +157,15 @@ def main() -> int:
     # sim_steps=0 => no simulated feed; we attach a real Exness feed per pair.
     # flip_cooldown_bars: on a real account every reversal pays the spread, so
     # rate-limit direction changes (default 3 bars; FLIP_COOLDOWN=0 disables).
-    os_ = TradingOS(Config(
+    cfg = Config(
         symbols=symbols,
         sim_steps=0,
         flip_cooldown_bars=int(os.environ.get("FLIP_COOLDOWN", "3")),
-    ))
+    )
+    # Regime filter: only trade genuine trends (TREND_FILTER=0 disables). A/B
+    # tested to roughly halve losses vs trading everything on the harsh sim.
+    cfg.risk.min_trend_strength = float(os.environ.get("TREND_FILTER", "1.0"))
+    os_ = TradingOS(cfg)
     os_.broker = broker
     os_.execution.broker = broker
     for sym in symbols:
