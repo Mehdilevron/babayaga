@@ -162,9 +162,11 @@ def main() -> int:
         sim_steps=0,
         flip_cooldown_bars=int(os.environ.get("FLIP_COOLDOWN", "3")),
     )
-    # Regime filter: only trade genuine trends (TREND_FILTER=0 disables). A/B
-    # tested to roughly halve losses vs trading everything on the harsh sim.
+    # Principled, A/B-measured strategy settings (TREND_FILTER=0 disables the
+    # regime filter). Regime filter + asymmetric R:R (tight stop, wide target).
     cfg.risk.min_trend_strength = float(os.environ.get("TREND_FILTER", "1.0"))
+    cfg.risk.atr_stop_mult = float(os.environ.get("ATR_STOP", "1.5"))
+    cfg.risk.atr_target_mult = float(os.environ.get("ATR_TARGET", "6.0"))
     os_ = TradingOS(cfg)
     os_.broker = broker
     os_.execution.broker = broker

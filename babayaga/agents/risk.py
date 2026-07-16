@@ -39,6 +39,9 @@ class RiskLimits:
     min_trend_strength: float = 0.0
     trend_fast: int = 12
     trend_slow: int = 26
+    # Volatility floor: skip dead markets where ATR is a tiny fraction of price.
+    # There's nothing to capture and the spread dominates. 0.0 = off.
+    min_atr_pct: float = 0.0
 
 
 class RiskAgent:
@@ -90,6 +93,14 @@ class RiskAgent:
         atr = ind.atr(highs, lows, closes, self.limits.atr_period)
         if atr is None or atr <= 0:
             return flat("ATR unavailable — cannot size stop")
+
+        # Volatility floor: don't trade a market that isn't moving.
+        if self.limits.min_atr_pct > 0 and price > 0:
+            if atr / price < self.limits.min_atr_pct:
+                return flat(
+                    f"low volatility (ATR {atr / price * 100:.3f}% < "
+                    f"{self.limits.min_atr_pct * 100:.3f}%)"
+                )
 
         # Regime filter: only trade when a genuine trend exists. Trend-followers
         # lose money getting whipsawed in chop while paying the spread; this

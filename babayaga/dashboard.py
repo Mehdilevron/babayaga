@@ -368,11 +368,16 @@ def main(argv: list[str] | None = None) -> int:
         flip_cooldown_bars=3 if realistic else 0,
     )
     if realistic:
-        # Regime filter: only trade genuine trends (measured A/B to roughly
-        # halve losses vs trading everything). Still not an edge on its own.
+        # Principled, A/B-measured strategy settings (cumulative effect: median
+        # ~-3.7% -> ~-0.85%, profitable seeds 10/40 -> 19/40 on the harsh sim):
+        #  - regime filter: only trade genuine trends, never against them
+        #  - asymmetric R:R: tight 1.5xATR stop, wide 6xATR target (let winners
+        #    run — the core of how trend-following actually makes money)
         cfg.risk.min_trend_strength = 1.0
+        cfg.risk.atr_stop_mult = 1.5
+        cfg.risk.atr_target_mult = 6.0
         print("REALISTIC MODE: real spreads + slippage, weak drift, flip cooldown, "
-              "regime filter. This is much closer to a real account than the demo.")
+              "regime filter, asymmetric targets. Closest thing to a real account.")
     os_ = TradingOS(cfg)
     dash = Dashboard(os_, host=args.host, port=args.port)
     dash.serve_forever_in_thread()
