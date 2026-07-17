@@ -91,6 +91,24 @@ def test_regime_filter_vetoes_chop_and_counter_trend():
     assert "chop" in d3.rationale
 
 
+def test_mean_reversion_fades_extremes():
+    from babayaga.agents.mean_reversion import MeanReversionAgent
+
+    agent = MeanReversionAgent(period=20)
+    # A long flat base then a sharp spike UP -> price far above mean -> SELL (fade).
+    base = [1.0000] * 25
+    spike = base + [1.05]
+    hist = [Candle("EUR/USD", float(i), p, p, p, p, 0.0) for i, p in enumerate(spike)]
+    sig = agent.evaluate("EUR/USD", hist)
+    assert sig is not None and sig.side is Side.SELL
+
+    # A sharp drop DOWN -> price far below mean -> BUY (fade).
+    dip = base + [0.95]
+    hist2 = [Candle("EUR/USD", float(i), p, p, p, p, 0.0) for i, p in enumerate(dip)]
+    sig2 = agent.evaluate("EUR/USD", hist2)
+    assert sig2 is not None and sig2.side is Side.BUY
+
+
 def test_regime_filter_off_by_default():
     # Default limits keep the filter disabled (min_trend_strength=0.0).
     risk = RiskAgent(RiskLimits(min_confidence=0.0))
