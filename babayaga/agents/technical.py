@@ -38,14 +38,18 @@ class TechnicalAgent(SpecialistAgent):
         votes: list[float] = []
         reasons: list[str] = []
 
+        # Trend + MACD in a single pass (fast/slow EMA series computed once and
+        # shared) instead of ema()+ema()+macd() recomputing them 5 times total.
+        tm = ind.trend_and_macd(closes, self.fast, self.slow)
+
         # 1) Trend: fast vs slow EMA.
-        fast_e = ind.ema(closes, self.fast)
-        slow_e = ind.ema(closes, self.slow)
-        if fast_e is not None and slow_e is not None and slow_e != 0:
-            spread = (fast_e - slow_e) / slow_e
-            trend_vote = max(-1.0, min(1.0, spread * 400))  # scale bp-ish spread
-            votes.append(trend_vote)
-            reasons.append(f"EMA{self.fast}/{self.slow} {'bull' if trend_vote > 0 else 'bear'} ({spread*100:+.2f}%)")
+        if tm is not None:
+            fast_e, slow_e, _, _, hist = tm
+            if slow_e != 0:
+                spread = (fast_e - slow_e) / slow_e
+                trend_vote = max(-1.0, min(1.0, spread * 400))  # scale bp-ish spread
+                votes.append(trend_vote)
+                reasons.append(f"EMA{self.fast}/{self.slow} {'bull' if trend_vote > 0 else 'bear'} ({spread*100:+.2f}%)")
 
         # 2) Momentum: RSI distance from 50.
         rsi_val = ind.rsi(closes, self.rsi_period)
@@ -54,10 +58,9 @@ class TechnicalAgent(SpecialistAgent):
             votes.append(rsi_vote)
             reasons.append(f"RSI {rsi_val:.0f}")
 
-        # 3) MACD histogram sign & magnitude.
-        macd = ind.macd(closes, self.fast, self.slow)
-        if macd is not None:
-            _, _, hist = macd
+        # 3) MACD histogram sign & magnitude (from the same single pass above).
+        if tm is not None and tm[4] is not None:
+            hist = tm[4]
             macd_vote = max(-1.0, min(1.0, hist / (abs(closes[-1]) * 0.002 + 1e-9)))
             votes.append(macd_vote)
             reasons.append(f"MACD hist {hist:+.5f}")

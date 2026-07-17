@@ -170,8 +170,14 @@ def main() -> int:
     os_ = TradingOS(cfg)
     os_.broker = broker
     os_.execution.broker = broker
+    # Reaction latency: how quickly the bot notices a freshly-closed bar. 1s
+    # default reacts within ~1s of bar close (vs the old 5s). POLL_INTERVAL tunes
+    # it. Faster than ~0.5s just wastes API calls — the bar only closes once/min.
+    poll = float(os.environ.get("POLL_INTERVAL", "1.0"))
     for sym in symbols:
-        os_.attach_feed(sym, ExnessMT5Feed(mt5, sym, timeframe="M1", suffix=suffix))
+        os_.attach_feed(
+            sym, ExnessMT5Feed(mt5, sym, timeframe="M1", suffix=suffix, poll_interval=poll)
+        )
 
     dash = Dashboard(os_, host=os.environ.get("HOST", "127.0.0.1"), port=int(os.environ.get("PORT", "8765")))
     dash.serve_forever_in_thread()

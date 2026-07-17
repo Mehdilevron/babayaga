@@ -24,15 +24,55 @@ def ema_series(values: Sequence[float], period: int) -> list[float]:
         return []
     k = 2.0 / (period + 1.0)
     out: list[float] = [values[0]]
+    prev = values[0]
     for v in values[1:]:
-        out.append(v * k + out[-1] * (1.0 - k))
+        prev = v * k + prev * (1.0 - k)
+        out.append(prev)
     return out
+
+
+def ema_last(values: Sequence[float], period: int) -> float | None:
+    """Latest EMA value only — O(1) memory, no intermediate list built."""
+    if not values or period <= 0:
+        return None
+    k = 2.0 / (period + 1.0)
+    prev = values[0]
+    for v in values[1:]:
+        prev = v * k + prev * (1.0 - k)
+    return prev
 
 
 def ema(values: Sequence[float], period: int) -> float | None:
     if len(values) < period:
         return None
-    return ema_series(values, period)[-1]
+    return ema_last(values, period)
+
+
+def trend_and_macd(
+    values: Sequence[float],
+    fast: int = 12,
+    slow: int = 26,
+    signal: int = 9,
+) -> tuple[float, float, float, float | None, float | None] | None:
+    """Fast EMA, slow EMA, MACD line, signal line and histogram in ONE pass.
+
+    Computes the fast/slow EMA series a single time and derives everything from
+    them, instead of the technical agent calling ``ema`` twice and ``macd``
+    (which recomputes both series again). Behaviour matches the separate calls
+    exactly: EMAs are available once ``len >= slow`` (26); the signal line and
+    histogram are ``None`` until ``len >= slow + signal`` (35), mirroring
+    ``ema``/``macd`` returning None below their own thresholds.
+    """
+    if len(values) < slow:
+        return None
+    fast_e = ema_series(values, fast)
+    slow_e = ema_series(values, slow)
+    macd_line = [f - s for f, s in zip(fast_e, slow_e)]
+    macd_last = macd_line[-1]
+    if len(values) < slow + signal:
+        return fast_e[-1], slow_e[-1], macd_last, None, None
+    signal_last = ema_last(macd_line, signal)
+    return fast_e[-1], slow_e[-1], macd_last, signal_last, macd_last - signal_last
 
 
 def rsi(values: Sequence[float], period: int = 14) -> float | None:

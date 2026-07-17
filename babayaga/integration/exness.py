@@ -99,7 +99,7 @@ class ExnessMT5Feed(MarketDataFeed):
         symbol: str,
         timeframe: str = "M1",
         suffix: str = "",
-        poll_interval: float = 5.0,
+        poll_interval: float = 1.0,   # how often to check for a new closed bar
         warmup_bars: int = 200,
         max_bars: int | None = None,
     ) -> None:
