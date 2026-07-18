@@ -29,7 +29,10 @@ _TYPICAL: dict[str, tuple[float, float]] = {
     "AUD/USD": (0.6600, 0.00012),
     "USD/CHF": (0.8800, 0.00012),
     "USD/CAD": (1.3600, 0.00012),
+    "NZD/USD": (0.6100, 0.00015),
+    "GBP/JPY": (190.00, 0.035),     # volatile cross — wider spread
     "XAU/USD": (2000.0, 0.30),      # gold
+    "NAS100/USD": (20000.0, 3.0),   # Nasdaq-100 index CFD (USTEC on Exness)
     "XAG/USD": (24.00, 0.020),      # silver
     "BTC/USD": (60000.0, 5.0),
     "ETH/USD": (3000.0, 1.0),

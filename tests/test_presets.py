@@ -1,0 +1,39 @@
+import pytest
+
+from babayaga.agents.mean_reversion import MeanReversionAgent
+from babayaga.agents.presets import strategy_preset
+from babayaga.agents.technical import TechnicalAgent
+from babayaga.integration.market_data import typical_price, typical_spread
+
+
+def test_meanrev_preset():
+    risk, specs = strategy_preset("meanrev")
+    assert risk.min_trend_strength == 0.0
+    assert risk.atr_stop_mult == risk.atr_target_mult == 2.0
+    assert len(specs) == 1 and isinstance(specs[0], MeanReversionAgent)
+
+
+def test_trend_preset():
+    risk, specs = strategy_preset("trend")
+    assert risk.min_trend_strength == 1.0
+    assert risk.atr_target_mult == 6.0
+    assert any(isinstance(s, TechnicalAgent) for s in specs)
+
+
+def test_unknown_preset_raises():
+    with pytest.raises(ValueError):
+        strategy_preset("hodl")
+
+
+def test_new_instruments_have_realistic_quotes():
+    assert typical_price("GBP/JPY") == 190.0
+    assert typical_spread("GBP/JPY") > typical_spread("EUR/USD")  # cross is wider
+    assert typical_price("NAS100/USD") == 20000.0
+    assert typical_spread("NAS100/USD") == 3.0
+
+
+def test_backtest_symbol_mapping_for_new_files():
+    from babayaga.backtest import symbol_from_filename
+
+    assert symbol_from_filename("data/gbpjpy_d.csv") == "GBP/JPY"
+    assert symbol_from_filename("data/nas100usd_d.csv") == "NAS100/USD"

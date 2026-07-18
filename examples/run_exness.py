@@ -53,6 +53,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from babayaga import Config, TradingOS
+from babayaga.agents.presets import strategy_preset
 from babayaga.dashboard import Dashboard
 from babayaga.integration.exness import ExnessMT5Broker, ExnessMT5Feed, connect, load_mt5
 
@@ -157,17 +158,34 @@ def main() -> int:
     # sim_steps=0 => no simulated feed; we attach a real Exness feed per pair.
     # flip_cooldown_bars: on a real account every reversal pays the spread, so
     # rate-limit direction changes (default 3 bars; FLIP_COOLDOWN=0 disables).
+    # Strategy preset. On 17y of real daily FX, 'meanrev' was the only family
+    # with a positive OUT-OF-SAMPLE median (see scripts/research.py) — so it is
+    # the default. STRATEGY=trend selects the trend-follower instead.
+    strategy = os.environ.get("STRATEGY", "meanrev")
+    risk, specialists = strategy_preset(strategy)
     cfg = Config(
         symbols=symbols,
         sim_steps=0,
         flip_cooldown_bars=int(os.environ.get("FLIP_COOLDOWN", "3")),
+        risk=risk,
     )
-    # Principled, A/B-measured strategy settings (TREND_FILTER=0 disables the
-    # regime filter). Regime filter + asymmetric R:R (tight stop, wide target).
-    cfg.risk.min_trend_strength = float(os.environ.get("TREND_FILTER", "1.0"))
-    cfg.risk.atr_stop_mult = float(os.environ.get("ATR_STOP", "1.5"))
-    cfg.risk.atr_target_mult = float(os.environ.get("ATR_TARGET", "6.0"))
+    # Optional expert overrides of the preset's risk parameters.
+    if "TREND_FILTER" in os.environ:
+        cfg.risk.min_trend_strength = float(os.environ["TREND_FILTER"])
+    if "ATR_STOP" in os.environ:
+        cfg.risk.atr_stop_mult = float(os.environ["ATR_STOP"])
+    if "ATR_TARGET" in os.environ:
+        cfg.risk.atr_target_mult = float(os.environ["ATR_TARGET"])
     os_ = TradingOS(cfg)
+    os_.coordinator.specialists = specialists
+
+    # Timeframe: the research validated DAILY bars. M1 is untested for either
+    # preset — stick to D1 unless you know why you're changing it.
+    timeframe = os.environ.get("TIMEFRAME", "D1")
+    print(f"Strategy: {strategy}  |  timeframe: {timeframe}"
+          + ("   (validated on daily data; other timeframes are untested)"
+             if timeframe == "D1" else
+             "   (WARNING: only D1 was validated by the research)"))
     os_.broker = broker
     os_.execution.broker = broker
     # Reaction latency: how quickly the bot notices a freshly-closed bar. 1s
@@ -176,7 +194,7 @@ def main() -> int:
     poll = float(os.environ.get("POLL_INTERVAL", "1.0"))
     for sym in symbols:
         os_.attach_feed(
-            sym, ExnessMT5Feed(mt5, sym, timeframe="M1", suffix=suffix, poll_interval=poll)
+            sym, ExnessMT5Feed(mt5, sym, timeframe=timeframe, suffix=suffix, poll_interval=poll)
         )
 
     dash = Dashboard(os_, host=os.environ.get("HOST", "127.0.0.1"), port=int(os.environ.get("PORT", "8765")))

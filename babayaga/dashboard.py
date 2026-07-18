@@ -339,6 +339,9 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="cap on retained ticks/signals for nonstop runs; trades are never pruned")
     p.add_argument("--realistic", action="store_true",
                    help="~real-account mode: real spreads + slippage, weak drift, flip cooldown")
+    p.add_argument("--strategy", choices=("trend", "meanrev"), default="trend",
+                   help="strategy preset; 'meanrev' is the research pick on real daily FX "
+                        "(note: this simulator's synthetic drift favors 'trend')")
     return p
 
 
@@ -367,18 +370,19 @@ def main(argv: list[str] | None = None) -> int:
         sim_drift_scale=0.2 if realistic else 1.0,
         flip_cooldown_bars=3 if realistic else 0,
     )
+    from babayaga.agents.presets import strategy_preset
+
+    preset_risk, preset_specs = strategy_preset(args.strategy)
+    cfg.risk = preset_risk
     if realistic:
-        # Principled, A/B-measured strategy settings (cumulative effect: median
-        # ~-3.7% -> ~-0.85%, profitable seeds 10/40 -> 19/40 on the harsh sim):
-        #  - regime filter: only trade genuine trends, never against them
-        #  - asymmetric R:R: tight 1.5xATR stop, wide 6xATR target (let winners
-        #    run — the core of how trend-following actually makes money)
-        cfg.risk.min_trend_strength = 1.0
-        cfg.risk.atr_stop_mult = 1.5
-        cfg.risk.atr_target_mult = 6.0
-        print("REALISTIC MODE: real spreads + slippage, weak drift, flip cooldown, "
-              "regime filter, asymmetric targets. Closest thing to a real account.")
+        print("REALISTIC MODE: real spreads + slippage, weak drift, flip cooldown. "
+              "Closest thing to a real account.")
+    print(f"Strategy preset: {args.strategy}"
+          + ("  (research pick on real daily FX — note this synthetic sim's drift "
+             "favors 'trend', so judge meanrev on real data, not here)"
+             if args.strategy == "meanrev" else ""))
     os_ = TradingOS(cfg)
+    os_.coordinator.specialists = preset_specs
     dash = Dashboard(os_, host=args.host, port=args.port)
     dash.serve_forever_in_thread()
     _print_access_banner(args.host, args.port)

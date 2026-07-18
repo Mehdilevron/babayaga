@@ -39,6 +39,7 @@ PAIRS = {
     "usdcad": ("USD", "CAD"),
     "usdchf": ("USD", "CHF"),
     "nzdusd": ("NZD", "USD"),
+    "gbpjpy": ("GBP", "JPY"),   # volatile cross, ECB provides both legs
 }
 
 OUT = Path(__file__).resolve().parent.parent / "data"
@@ -64,6 +65,42 @@ def fetch_series(frm: str, to: str) -> dict[str, float]:
     return dict(sorted(rates.items()))
 
 
+def fetch_nasdaq() -> bool:
+    """Optional: Nasdaq-100 daily history via yfinance (pip3 install yfinance).
+
+    Indices aren't ECB rates, so this needs Yahoo Finance. Skipped gracefully
+    when yfinance isn't installed. Writes real OHLC (not close-only).
+    """
+    try:
+        import yfinance as yf  # type: ignore
+    except ImportError:
+        print("  NAS100    skipped — run `pip3 install yfinance` and rerun to include Nasdaq-100")
+        return False
+    try:
+        df = yf.download("^NDX", start=f"{START_YEAR}-01-01", progress=False, auto_adjust=True)
+    except Exception as exc:  # noqa: BLE001
+        print(f"  NAS100    FAILED: {exc}")
+        return False
+    if df is None or len(df) < 200:
+        print("  NAS100    FAILED: not enough data returned")
+        return False
+    if hasattr(df.columns, "nlevels") and df.columns.nlevels > 1:
+        df.columns = df.columns.droplevel(1)  # newer yfinance returns MultiIndex
+    path = OUT / "nas100usd_d.csv"
+    lines = ["Date,Open,High,Low,Close"]
+    for idx, row in df.iterrows():
+        try:
+            lines.append(
+                f"{idx.date().isoformat()},{float(row['Open']):.2f},"
+                f"{float(row['High']):.2f},{float(row['Low']):.2f},{float(row['Close']):.2f}"
+            )
+        except (KeyError, TypeError, ValueError):
+            continue
+    path.write_text("\n".join(lines))
+    print(f"  NAS100/USD {len(lines) - 1:5} daily bars -> {path.relative_to(OUT.parent)}")
+    return True
+
+
 def main() -> int:
     OUT.mkdir(exist_ok=True)
     ok = 0
@@ -84,6 +121,9 @@ def main() -> int:
         dates = list(series)
         print(f"  {frm}/{to:4} {len(series):5} daily bars ({dates[0]} → {dates[-1]}) "
               f"-> {path.relative_to(OUT.parent)}")
+        ok += 1
+
+    if fetch_nasdaq():
         ok += 1
 
     if ok == 0:
