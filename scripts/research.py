@@ -20,6 +20,9 @@ import statistics
 import sys
 from pathlib import Path
 
+# Allow running directly ("python3 scripts/research.py") without installing.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 from babayaga.agents.mean_reversion import MeanReversionAgent
 from babayaga.agents.risk import RiskLimits
 from babayaga.agents.sentiment import SentimentAgent
