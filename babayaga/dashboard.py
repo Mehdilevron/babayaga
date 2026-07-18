@@ -205,6 +205,7 @@ _INDEX_HTML = """<!doctype html>
   <h1>🐺 BabaYaga OS</h1>
   <span class="badge" id="conn">connecting…</span>
   <span class="badge" style="background:#241a24;color:#e6a0c0">PAPER — simulated</span>
+  <span class="badge" id="halt" style="display:none;background:#3a1420;color:#ff8f9f">⛔ TRADING HALTED — loss limit / drawdown breaker</span>
 </header>
 <div class="wrap">
   <div class="card">
@@ -260,6 +261,7 @@ es.onmessage = e => {
     $('open').textContent=data.open_positions;
     const r=(data.equity-start)/start*100;
     $('ret').textContent=fmt(r)+'%'; $('ret').className='v '+(r>=0?'pos':'neg');
+    $('halt').style.display = data.halted ? 'inline' : 'none';
     drawChart();
   } else if(topic==='tick'){
     tickCount++; $('ticks').textContent=tickCount;
@@ -331,7 +333,12 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--cash", type=float, default=1000.0, help="starting account balance")
     p.add_argument("--steps", type=int, default=0, help="number of bars; 0 = run nonstop (24/7)")
-    p.add_argument("--seed", type=int, default=7)
+    p.add_argument("--seed", type=int, default=None,
+                   help="simulation seed; default = random each run (a fixed seed replays "
+                        "the exact same market — and the same result — every time)")
+    p.add_argument("--max-loss", type=float, default=150.0, dest="max_loss",
+                   help="LATCHING hard stop: lose this much and the bot flattens and stops "
+                        "until restarted (0 disables)")
     p.add_argument("--interval", type=float, default=0.08, help="seconds between bars")
     p.add_argument("--memory", default=":memory:",
                    help="SQLite path for persistent memory (e.g. babayaga.sqlite), or :memory:")
@@ -350,6 +357,11 @@ def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(message)s")
 
     symbols = tuple(s.strip() for s in args.symbol.split(",") if s.strip())
+    if args.seed is None:
+        import random as _random
+
+        args.seed = _random.randrange(1_000_000)
+        print(f"seed: {args.seed}  (new random market this run; pass --seed {args.seed} to replay it)")
     # Realistic mode makes the simulator behave ~like a real account: realistic
     # per-pair spreads (already default), added slippage, weak trend (drift), and
     # a flip cooldown so every reversal isn't free. Expect a far soberer curve.
@@ -369,7 +381,10 @@ def main(argv: list[str] | None = None) -> int:
         slippage=0.00003 if realistic else 0.0,
         sim_drift_scale=0.2 if realistic else 1.0,
         flip_cooldown_bars=3 if realistic else 0,
+        hard_stop_loss=args.max_loss if args.max_loss > 0 else None,
     )
+    if args.max_loss > 0:
+        print(f"hard stop: lose ${args.max_loss:.0f} -> flatten everything and halt until restart")
     from babayaga.agents.presets import strategy_preset
 
     preset_risk, preset_specs = strategy_preset(args.strategy)

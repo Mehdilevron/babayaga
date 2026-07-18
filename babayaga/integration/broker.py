@@ -62,12 +62,15 @@ class PaperBroker(Broker):
         spread: float | None = None,  # price units; None = realistic per-symbol spread
         commission_per_unit: float = 0.0,
         slippage: float = 0.0,        # extra price units lost against the taker per fill
+        equity_floor: float | None = None,  # LATCHING hard stop at this equity
     ) -> None:
         self.starting_cash = starting_cash
         self.cash = starting_cash
         self.spread = spread
         self.commission_per_unit = commission_per_unit
         self.slippage = slippage
+        self.equity_floor = equity_floor
+        self.halted_hard = False
         self.positions: dict[str, Position] = {}
         self.realized_pnl = 0.0
         self._marks: dict[str, float] = {}
@@ -100,6 +103,26 @@ class PaperBroker(Broker):
     def mark_to_market(self, symbol: str, price: float) -> None:
         self._marks[symbol] = price
         self._check_protective_exits(symbol, price)
+        self._check_equity_floor()
+
+    def _check_equity_floor(self) -> None:
+        """LATCHING hard stop: at the floor, flatten everything and refuse all
+        further orders ("stop and don't trade until my command")."""
+        if self.equity_floor is None or self.halted_hard:
+            return
+        if self.equity > self.equity_floor:
+            return
+        for sym, pos in list(self.positions.items()):
+            if pos.size != 0:
+                mark = self._marks.get(sym, pos.avg_price)
+                fill = self.submit(
+                    Order(sym, Side.SELL if pos.size > 0 else Side.BUY,
+                          abs(pos.size), reason="hard_stop"),
+                    mark,
+                )
+                if fill:
+                    self._protective_fills.append(fill)
+        self.halted_hard = True
 
     # -- protective exits -------------------------------------------------
     def _check_protective_exits(self, symbol: str, price: float) -> None:
@@ -129,6 +152,8 @@ class PaperBroker(Broker):
 
     # -- order handling ---------------------------------------------------
     def submit(self, order: Order, mark_price: float) -> Fill | None:
+        if self.halted_hard:
+            return None  # hard stop latched: nothing trades until a restart
         if order.size <= 0 or order.side is Side.FLAT:
             return None
         fill_price = self._fill_price(order.symbol, order.side, mark_price)

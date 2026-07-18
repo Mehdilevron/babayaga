@@ -113,4 +113,7 @@ class AccountSnapshot:
     unrealized_pnl: float
     realized_pnl: float
     open_positions: int
+    # True when trading is frozen (drawdown breaker or hard stop) — surfaces
+    # the halt on dashboards instead of the bot silently going quiet.
+    halted: bool = False
     timestamp: float = field(default_factory=time.time)

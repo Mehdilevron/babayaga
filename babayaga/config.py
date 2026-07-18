@@ -20,6 +20,10 @@ class Config:
     # Extra price units lost against the taker on every fill (models the slippage
     # a real account eats beyond the quoted spread).
     slippage: float = 0.0
+    # LATCHING hard stop in account currency: lose this much from starting cash
+    # and the paper broker flattens everything and refuses all further trades.
+    # None = off. (The Exness broker has its own MAX_TOTAL_LOSS equivalent.)
+    hard_stop_loss: float | None = None
 
     # Data window each agent sees.
     history_window: int = 250

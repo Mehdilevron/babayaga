@@ -65,6 +65,11 @@ class TradingOS:
             spread=self.config.spread,
             commission_per_unit=self.config.commission_per_unit,
             slippage=self.config.slippage,
+            equity_floor=(
+                None
+                if self.config.hard_stop_loss is None
+                else self.config.starting_cash - self.config.hard_stop_loss
+            ),
         )
 
         # --- agent workflow -------------------------------------------
@@ -146,6 +151,7 @@ class TradingOS:
                 unrealized_pnl=self.broker.unrealized_pnl,
                 realized_pnl=self.broker.realized_pnl,
                 open_positions=self.broker.open_position_count(),
+                halted=self.risk.halted or getattr(self.broker, "halted_hard", False),
             ),
         )
 

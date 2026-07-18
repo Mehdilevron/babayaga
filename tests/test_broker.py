@@ -77,6 +77,29 @@ def test_slippage_applied_against_taker():
     assert sell is not None and round(sell.price, 6) == 1.1999
 
 
+def test_equity_floor_hard_stop_flattens_and_latches():
+    b = PaperBroker(starting_cash=1000.0, spread=0.0, equity_floor=950.0)
+    b.submit(Order("EUR/USD", Side.BUY, 100_000), mark_price=1.1000)
+    # Price falls 10 pips -> -$100 unrealized -> equity 900 <= floor 950.
+    b.mark_to_market("EUR/USD", 1.0990)
+    assert b.halted_hard is True
+    assert b.open_position_count() == 0  # everything was flattened
+    fills = b.pop_protective_fills()
+    assert any(f.order_reason == "hard_stop" for f in fills)  # visibly closed
+    # Latched: no new order is accepted, even a profitable-looking one.
+    assert b.submit(Order("EUR/USD", Side.BUY, 1000), mark_price=1.0990) is None
+    # And it stays latched even if marks recover.
+    b.mark_to_market("EUR/USD", 1.2000)
+    assert b.halted_hard is True
+
+
+def test_equity_floor_off_by_default():
+    b = PaperBroker(starting_cash=1000.0, spread=0.0)
+    b.submit(Order("EUR/USD", Side.BUY, 100_000), mark_price=1.1000)
+    b.mark_to_market("EUR/USD", 1.0900)  # -$1000, but no floor configured
+    assert b.halted_hard is False
+
+
 def test_averaging_up_updates_avg_price():
     b = PaperBroker(starting_cash=100_000, spread=0.0)
     b.submit(Order("EUR/USD", Side.BUY, 10_000), mark_price=1.1000)
