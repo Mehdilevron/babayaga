@@ -45,6 +45,15 @@ class Broker(ABC):
     @abstractmethod
     def equity(self) -> float: ...
 
+    def pop_protective_fills(self) -> list[Fill]:
+        """Fills produced broker-side (stop-loss/take-profit) since last call.
+
+        Protective exits happen inside mark_to_market, outside the normal
+        order flow — without this hook they would be invisible to the event
+        bus, memory journal and dashboard.
+        """
+        return []
+
 
 class PaperBroker(Broker):
     def __init__(
@@ -63,6 +72,7 @@ class PaperBroker(Broker):
         self.realized_pnl = 0.0
         self._marks: dict[str, float] = {}
         self.closed_trade_pnls: list[float] = []
+        self._protective_fills: list[Fill] = []
 
     # -- pricing ----------------------------------------------------------
     def _spread_for(self, symbol: str) -> float:
@@ -106,10 +116,16 @@ class PaperBroker(Broker):
         )
         if hit_stop or hit_tp:
             reason = "stop_loss" if hit_stop else "take_profit"
-            self.submit(
+            fill = self.submit(
                 Order(symbol, Side.SELL if pos.size > 0 else Side.BUY, abs(pos.size), reason=reason),
                 price,
             )
+            if fill:
+                self._protective_fills.append(fill)
+
+    def pop_protective_fills(self) -> list[Fill]:
+        fills, self._protective_fills = self._protective_fills, []
+        return fills
 
     # -- order handling ---------------------------------------------------
     def submit(self, order: Order, mark_price: float) -> Fill | None:

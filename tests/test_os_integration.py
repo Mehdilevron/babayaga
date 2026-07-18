@@ -55,6 +55,53 @@ def test_simulated_feed_runs_forever_when_steps_zero():
     assert len(got) == 300
 
 
+def test_multi_pair_feeds_interleave_not_sequential():
+    # Regression: with interval=0 feeds used to run to completion one after
+    # another, so "multi-pair" backtests were secretly sequential.
+    from babayaga.kernel.events import Topic
+
+    os_ = TradingOS(Config(symbols=("EUR/USD", "GBP/USD"), sim_steps=50, sim_seed=1))
+    order: list[str] = []
+    os_.on(Topic.TICK, lambda c: order.append(c.symbol))
+    os_.run_backtest()
+    first_half = order[: len(order) // 2]
+    # Both symbols must appear early — not one symbol's full history first.
+    assert "EUR/USD" in first_half and "GBP/USD" in first_half
+    switches = sum(1 for a, b in zip(order, order[1:]) if a != b)
+    assert switches > 10  # round-robin, not two solid blocks (1 switch)
+
+
+def test_protective_exits_reach_bus_and_memory():
+    # Regression: broker-side stop-loss fills were invisible to bus/memory.
+    import asyncio as aio
+
+    from babayaga.integration.market_data import ReplayFeed
+    from babayaga.kernel.events import Topic
+
+    # A rise (open long via manual order) then a crash through the stop.
+    rows = []
+    price = 1.10
+    for i in range(80):
+        price += 0.001
+        rows.append((float(i), price, price + 0.0005, price - 0.0005, price, 0.0))
+    for i in range(80, 90):  # crash
+        price -= 0.01
+        rows.append((float(i), price, price + 0.0005, price - 0.0005, price, 0.0))
+
+    os_ = TradingOS(Config(symbols=("EUR/USD",), sim_steps=0))
+    os_.attach_feed("EUR/USD", ReplayFeed.from_rows("EUR/USD", rows))
+    seen: list = []
+    os_.on(Topic.FILL, lambda f: seen.append(f))
+    aio.run(os_.run())
+    protective = [f for f in seen if f.order_reason in ("stop_loss", "take_profit")]
+    # The trend strategy opens long on the rise; the crash must produce a
+    # VISIBLE stop-loss fill on the bus and in memory.
+    assert protective, "no protective fill reached the bus"
+    mem_reasons = [f["reason"] for f in os_.memory.fills()]
+    assert any(r in ("stop_loss", "take_profit") for r in mem_reasons)
+    os_.shutdown()
+
+
 def test_replay_feed_drives_the_os():
     # A clean uptrend should end with the agents net long and equity intact.
     rows = []

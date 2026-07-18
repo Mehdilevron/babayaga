@@ -115,6 +115,10 @@ class TradingOS:
 
         # Keep the broker's mark current; this may also trigger stop/target exits.
         self.broker.mark_to_market(symbol, candle.close)
+        # Protective exits (stop-loss/take-profit) happen inside the broker —
+        # surface them on the bus so memory and the dashboard see every fill.
+        for fill in self.broker.pop_protective_fills():
+            await self.bus.publish(Topic.FILL, fill)
         self.risk.update_equity(self.broker.equity)
 
         history = list(window)
@@ -189,6 +193,14 @@ class TradingOS:
     async def _drain(self, feed: MarketDataFeed) -> None:
         async for candle in feed.stream():
             await self.bus.publish(Topic.TICK, candle)
+            # Yield to the event loop after every bar. Without this, a feed
+            # with no pacing delay (interval=0, i.e. every backtest) runs its
+            # ENTIRE history before the next feed gets a turn — multi-pair
+            # runs silently became sequential single-pair runs, so early
+            # losses on one pair could trip the drawdown breaker and freeze
+            # all the others for their whole run. This makes multi-feed runs
+            # genuinely concurrent (round-robin per bar).
+            await asyncio.sleep(0)
 
     def run_backtest(self) -> PerformanceSummary:
         """Convenience: run to completion synchronously and return metrics."""
