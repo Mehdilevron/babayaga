@@ -15,8 +15,9 @@ Then run the edge test:
 
     python3 -m babayaga.backtest data/*.csv
 
-Note: gold (XAU) is not an ECB fiat rate, so it isn't available here — the FX
-majors below are what matters for the strategy anyway.
+Gold (XAU/USD, via COMEX futures) and the Nasdaq-100 index aren't ECB rates, so
+they come from Yahoo Finance instead; the script installs the small `yfinance`
+helper by itself on first run — you never need to run pip manually.
 """
 
 from __future__ import annotations
@@ -65,40 +66,75 @@ def fetch_series(frm: str, to: str) -> dict[str, float]:
     return dict(sorted(rates.items()))
 
 
-def fetch_nasdaq() -> bool:
-    """Optional: Nasdaq-100 daily history via yfinance (pip3 install yfinance).
+# Yahoo-sourced instruments (not ECB rates): Nasdaq-100 index and gold.
+# GC=F is COMEX gold futures — tracks spot XAU/USD closely; fine for daily
+# research. Decimals chosen per instrument for sane display.
+YAHOO = {
+    "^NDX": ("nas100usd_d.csv", "NAS100/USD", 2),
+    "GC=F": ("xauusd_d.csv", "XAU/USD", 2),
+}
 
-    Indices aren't ECB rates, so this needs Yahoo Finance. Skipped gracefully
-    when yfinance isn't installed. Writes real OHLC (not close-only).
-    """
+
+def _ensure_yfinance() -> bool:
+    """Import yfinance, installing it automatically on first run if missing."""
     try:
-        import yfinance as yf  # type: ignore
+        import yfinance  # noqa: F401
+        return True
     except ImportError:
-        print("  NAS100    skipped — run `pip3 install yfinance` and rerun to include Nasdaq-100")
-        return False
-    try:
-        df = yf.download("^NDX", start=f"{START_YEAR}-01-01", progress=False, auto_adjust=True)
-    except Exception as exc:  # noqa: BLE001
-        print(f"  NAS100    FAILED: {exc}")
-        return False
-    if df is None or len(df) < 200:
-        print("  NAS100    FAILED: not enough data returned")
-        return False
-    if hasattr(df.columns, "nlevels") and df.columns.nlevels > 1:
-        df.columns = df.columns.droplevel(1)  # newer yfinance returns MultiIndex
-    path = OUT / "nas100usd_d.csv"
-    lines = ["Date,Open,High,Low,Close"]
-    for idx, row in df.iterrows():
+        pass
+    print("  installing yfinance (one-time, needed for Nasdaq & gold)...")
+    import subprocess
+
+    for extra in ([], ["--user"]):
         try:
-            lines.append(
-                f"{idx.date().isoformat()},{float(row['Open']):.2f},"
-                f"{float(row['High']):.2f},{float(row['Low']):.2f},{float(row['Close']):.2f}"
+            subprocess.check_call(
+                [sys.executable, "-m", "pip", "install", "--quiet", *extra, "yfinance"]
             )
-        except (KeyError, TypeError, ValueError):
+            break
+        except Exception:  # noqa: BLE001 - try the next flavour
             continue
-    path.write_text("\n".join(lines))
-    print(f"  NAS100/USD {len(lines) - 1:5} daily bars -> {path.relative_to(OUT.parent)}")
-    return True
+    try:
+        import yfinance  # noqa: F401
+        return True
+    except ImportError:
+        print("  could not install yfinance — skipping Nasdaq & gold (FX still works)")
+        return False
+
+
+def fetch_yahoo() -> int:
+    """Fetch the Yahoo-sourced instruments. Returns how many succeeded."""
+    if not _ensure_yfinance():
+        return 0
+    import yfinance as yf  # type: ignore
+
+    ok = 0
+    for ticker, (fname, label, dp) in YAHOO.items():
+        try:
+            df = yf.download(ticker, start=f"{START_YEAR}-01-01",
+                             progress=False, auto_adjust=True)
+        except Exception as exc:  # noqa: BLE001
+            print(f"  {label:10} FAILED: {exc}")
+            continue
+        if df is None or len(df) < 200:
+            print(f"  {label:10} FAILED: not enough data returned")
+            continue
+        if hasattr(df.columns, "nlevels") and df.columns.nlevels > 1:
+            df.columns = df.columns.droplevel(1)  # newer yfinance MultiIndex
+        path = OUT / fname
+        lines = ["Date,Open,High,Low,Close"]
+        for idx, row in df.iterrows():
+            try:
+                lines.append(
+                    f"{idx.date().isoformat()},{float(row['Open']):.{dp}f},"
+                    f"{float(row['High']):.{dp}f},{float(row['Low']):.{dp}f},"
+                    f"{float(row['Close']):.{dp}f}"
+                )
+            except (KeyError, TypeError, ValueError):
+                continue
+        path.write_text("\n".join(lines))
+        print(f"  {label:10} {len(lines) - 1:5} daily bars -> {path.relative_to(OUT.parent)}")
+        ok += 1
+    return ok
 
 
 def main() -> int:
@@ -123,8 +159,7 @@ def main() -> int:
               f"-> {path.relative_to(OUT.parent)}")
         ok += 1
 
-    if fetch_nasdaq():
-        ok += 1
+    ok += fetch_yahoo()
 
     if ok == 0:
         print("\nNo data downloaded. Check your internet connection, or export daily")
