@@ -18,7 +18,7 @@ being destroyed**, and only risk money on behaviour that real data supports.
 | Capital | **$2,000** |
 | Maximum total loss | **$150** — latching hard stop |
 | On hard stop | Flatten every position, halt, stay halted across restarts until the owner deletes `HALTED.lock` |
-| Strategy preset | `meanrev` (pending re-validation — see below) |
+| Strategy preset | `regime-switch` best out-of-sample (+0.42%); `meanrev` close (+0.35%); `trend` loses — demo-gated, see below |
 | Timeframe | D1 (the only validated timeframe) |
 | Mode order | real-data research → weeks of demo → only then live |
 
@@ -35,19 +35,35 @@ the owner, never by an assistant.
 - Two engine bugs were found by loss forensics and fixed with regression
   tests: protective exits were invisible to the bus/dashboard; multi-pair
   backtests ran feeds sequentially instead of concurrently.
-- On 17 years of real daily FX (ECB), the **trend strategy has no edge**
-  (out-of-sample median ≈ 0).
 - On real trending stock data, **mean-reversion loses badly** (expected: it
   fades trends).
+- **First honest out-of-sample signal (2026-07-20).** `scripts/deep_search.py`
+  on 17 years of real prices across 10 instruments, net of spread,
+  walk-forward (params locked on 2009–2018 before scoring 2019–2026), median
+  per pair-year:
+
+  | strategy | in-sample | OUT-OF-SAMPLE |
+  |---|---:|---:|
+  | trend | −1.47% | **−1.74%** (no edge, confirmed) |
+  | meanrev | +0.84% | **+0.35%** |
+  | regime-switch | +1.08% | **+0.42%** |
+
+  The same engine scores **−1.98% on pure random walks** (`--noise`), so the
+  positive real-data numbers are a genuine signal, not fitting. This is the
+  first time anything survived out-of-sample. **regime-switch** (Kaufman
+  Efficiency-Ratio regime detector: trend-follow when trending, fade when
+  ranging) is the best.
 
 ## What is NOT proven
 
-- **Any strategy's real edge.** meanrev showed +1.31% out-of-sample median on
-  real FX, but that was measured before the concurrency fix — it must be
-  re-validated with `python3 scripts/fetch_history.py && python3
-  scripts/research.py` and judged by its OUT-OF-SAMPLE median.
-- Gold and Nasdaq-100 as tradeable instruments (data support added; verdict
-  pending the same research run).
+- **That the out-of-sample signal is big enough to trade for real.** +0.35%
+  to +0.42% median per pair-year is *thin*. The backtest does NOT model swap
+  fees, news-spread widening, or slippage past the modelled half-spread — any
+  of which can eat a thin edge. Positive out-of-sample earns a DEMO, nothing
+  more, until weeks of demo tracking agree with the table.
+- **The demo agreeing with the backtest.** Not yet run.
+- Gold and Nasdaq-100 as *individually* tradeable instruments (they are in the
+  10-instrument pool above but per-instrument stability is not broken out).
 
 ## Iron rules (do not relax these)
 
