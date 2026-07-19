@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from babayaga.agents.base import SpecialistAgent
 from babayaga.agents.mean_reversion import MeanReversionAgent
+from babayaga.agents.regime_switch import RegimeSwitchAgent
 from babayaga.agents.risk import RiskLimits
 from babayaga.agents.sentiment import SentimentAgent
 from babayaga.agents.technical import TechnicalAgent
@@ -23,6 +24,21 @@ from babayaga.agents.technical import TechnicalAgent
 def strategy_preset(kind: str) -> tuple[RiskLimits, list[SpecialistAgent]]:
     """Return (risk limits, specialist committee) for a named strategy family."""
     kind = kind.strip().lower()
+    if kind in ("regime", "regime-switch", "regimeswitch"):
+        # Best out-of-sample family in scripts/deep_search.py on real data
+        # (+0.42% OOS median, walk-forward). The agent decides trend-vs-range
+        # itself via the Efficiency Ratio, so the risk layer must NOT also
+        # impose a trend filter (min_trend_strength=0). Balanced R:R: a touch
+        # wider target than stop, since the trend leg wants room to run.
+        return (
+            RiskLimits(
+                min_trend_strength=0.0,
+                atr_stop_mult=2.0,
+                atr_target_mult=3.0,
+                min_confidence=0.1,
+            ),
+            [RegimeSwitchAgent()],
+        )
     if kind == "meanrev":
         # Fade Bollinger extremes; symmetric R:R (reversion targets the mean,
         # not a runaway trend), no trend filter (it trades AGAINST stretches).
@@ -41,4 +57,6 @@ def strategy_preset(kind: str) -> tuple[RiskLimits, list[SpecialistAgent]]:
             RiskLimits(min_trend_strength=1.0, atr_stop_mult=1.5, atr_target_mult=6.0),
             [TechnicalAgent(), SentimentAgent()],
         )
-    raise ValueError(f"unknown strategy {kind!r} — use 'meanrev' or 'trend'")
+    raise ValueError(
+        f"unknown strategy {kind!r} — use 'regime', 'meanrev' or 'trend'"
+    )

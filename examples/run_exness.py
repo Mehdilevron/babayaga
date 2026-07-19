@@ -158,10 +158,13 @@ def main() -> int:
     # sim_steps=0 => no simulated feed; we attach a real Exness feed per pair.
     # flip_cooldown_bars: on a real account every reversal pays the spread, so
     # rate-limit direction changes (default 3 bars; FLIP_COOLDOWN=0 disables).
-    # Strategy preset. On 17y of real daily FX, 'meanrev' was the only family
-    # with a positive OUT-OF-SAMPLE median (see scripts/research.py) — so it is
-    # the default. STRATEGY=trend selects the trend-follower instead.
-    strategy = os.environ.get("STRATEGY", "meanrev")
+    # Strategy preset. On 17y of real daily FX / 10 instruments, walk-forward
+    # and net of spread (see scripts/deep_search.py), 'regime' had the best
+    # positive OUT-OF-SAMPLE median (+0.42%), just ahead of 'meanrev' (+0.35%);
+    # 'trend' loses. So 'regime' is the default. STRATEGY=meanrev or
+    # STRATEGY=trend selects the others. All remain DEMO-gated until weeks of
+    # demo tracking agree with the backtest (MISSION.md).
+    strategy = os.environ.get("STRATEGY", "regime")
     risk, specialists = strategy_preset(strategy)
     cfg = Config(
         symbols=symbols,

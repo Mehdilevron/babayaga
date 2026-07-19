@@ -109,6 +109,47 @@ def test_mean_reversion_fades_extremes():
     assert sig2 is not None and sig2.side is Side.BUY
 
 
+def test_regime_switch_follows_a_clean_trend():
+    from babayaga.agents.regime_switch import RegimeSwitchAgent
+
+    agent = RegimeSwitchAgent()
+    # A straight rising line: Efficiency Ratio ~1.0 (trend regime), price above
+    # its SMA -> BUY (go WITH the trend, not against it).
+    up = [Candle("EUR/USD", float(i), p, p, p, p, 0.0)
+          for i, p in enumerate(1.0 + 0.002 * i for i in range(45))]
+    sig = agent.evaluate("EUR/USD", up)
+    assert sig is not None and sig.side is Side.BUY
+    assert sig.features["regime"] == "trend"
+
+    # A straight falling line: trend regime, price below SMA -> SELL.
+    down = [Candle("EUR/USD", float(i), p, p, p, p, 0.0)
+            for i, p in enumerate(1.10 - 0.002 * i for i in range(45))]
+    sig2 = agent.evaluate("EUR/USD", down)
+    assert sig2 is not None and sig2.side is Side.SELL
+    assert sig2.features["regime"] == "trend"
+
+
+def test_regime_switch_fades_extremes_in_a_range():
+    from babayaga.agents.regime_switch import RegimeSwitchAgent
+
+    agent = RegimeSwitchAgent()
+    # A tight zigzag: net change ~0 over the window -> low Efficiency Ratio
+    # (ranging regime). Ending on a high spike -> fade it -> SELL.
+    zig = [1.02 if i % 2 else 0.98 for i in range(40)]
+    hist = [Candle("EUR/USD", float(i), p, p, p, p, 0.0) for i, p in enumerate(zig)]
+    sig = agent.evaluate("EUR/USD", hist)
+    assert sig is not None and sig.side is Side.SELL
+    assert sig.features["regime"] == "range"
+
+
+def test_regime_switch_needs_enough_data():
+    from babayaga.agents.regime_switch import RegimeSwitchAgent
+
+    agent = RegimeSwitchAgent()
+    short = [Candle("EUR/USD", float(i), 1.0, 1.0, 1.0, 1.0, 0.0) for i in range(10)]
+    assert agent.evaluate("EUR/USD", short) is None
+
+
 def test_regime_filter_off_by_default():
     # Default limits keep the filter disabled (min_trend_strength=0.0).
     risk = RiskAgent(RiskLimits(min_confidence=0.0))

@@ -2,6 +2,7 @@ import pytest
 
 from babayaga.agents.mean_reversion import MeanReversionAgent
 from babayaga.agents.presets import strategy_preset
+from babayaga.agents.regime_switch import RegimeSwitchAgent
 from babayaga.agents.technical import TechnicalAgent
 from babayaga.integration.market_data import typical_price, typical_spread
 
@@ -18,6 +19,19 @@ def test_trend_preset():
     assert risk.min_trend_strength == 1.0
     assert risk.atr_target_mult == 6.0
     assert any(isinstance(s, TechnicalAgent) for s in specs)
+
+
+def test_regime_preset():
+    risk, specs = strategy_preset("regime")
+    assert risk.min_trend_strength == 0.0  # the agent decides regime itself
+    assert risk.atr_target_mult > risk.atr_stop_mult  # trend leg gets room
+    assert len(specs) == 1 and isinstance(specs[0], RegimeSwitchAgent)
+
+
+def test_regime_preset_aliases():
+    for alias in ("regime", "regime-switch", "REGIME", "regimeswitch"):
+        _risk, specs = strategy_preset(alias)
+        assert isinstance(specs[0], RegimeSwitchAgent)
 
 
 def test_unknown_preset_raises():

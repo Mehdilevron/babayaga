@@ -23,7 +23,8 @@ being destroyed**, and only risk money on behaviour that real data supports.
 | Mode order | real-data research → weeks of demo → only then live |
 
 Live launcher config (VPS): `MAX_TOTAL_LOSS=150`, `EQUITY_FLOOR=1850`,
-`MAX_LOT=0.01`, `STRATEGY=meanrev`, `TIMEFRAME=D1`, watchdog
+`MAX_LOT=0.01`, `STRATEGY=regime` (best OOS; `meanrev` a close alt),
+`TIMEFRAME=D1`, watchdog
 `scripts\run_exness_forever.bat`. `CONFIRM_LIVE=I_UNDERSTAND` is typed only by
 the owner, never by an assistant.
 

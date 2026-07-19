@@ -361,9 +361,11 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="cap on retained ticks/signals for nonstop runs; trades are never pruned")
     p.add_argument("--realistic", action="store_true",
                    help="~real-account mode: real spreads + slippage, weak drift, flip cooldown")
-    p.add_argument("--strategy", choices=("trend", "meanrev"), default="trend",
-                   help="strategy preset; 'meanrev' is the research pick on real daily FX "
-                        "(note: this simulator's synthetic drift favors 'trend')")
+    p.add_argument("--strategy", choices=("trend", "meanrev", "regime"), default="trend",
+                   help="strategy preset; 'regime' is the best out-of-sample family on "
+                        "real daily FX (trend-follow when trending, fade when ranging). "
+                        "Note: this simulator's synthetic drift favors 'trend', so judge "
+                        "regime/meanrev on real data via scripts/deep_search.py, not here")
     p.add_argument("--no-browser", action="store_true", dest="no_browser",
                    help="do not auto-open a web browser at the dashboard URL")
     return p
@@ -410,9 +412,10 @@ def main(argv: list[str] | None = None) -> int:
         print("REALISTIC MODE: real spreads + slippage, weak drift, flip cooldown. "
               "Closest thing to a real account.")
     print(f"Strategy preset: {args.strategy}"
-          + ("  (research pick on real daily FX — note this synthetic sim's drift "
-             "favors 'trend', so judge meanrev on real data, not here)"
-             if args.strategy == "meanrev" else ""))
+          + ("  (best out-of-sample family on real daily FX — note this synthetic "
+             "sim's drift favors 'trend', so judge it on real data via "
+             "scripts/deep_search.py, not here)"
+             if args.strategy in ("meanrev", "regime") else ""))
     os_ = TradingOS(cfg)
     os_.coordinator.specialists = preset_specs
     dash = Dashboard(os_, host=args.host, port=args.port)

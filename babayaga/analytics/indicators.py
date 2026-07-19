@@ -165,6 +165,25 @@ def bollinger(values: Sequence[float], period: int = 20, num_std: float = 2.0):
     return mid - num_std * std, mid, mid + num_std * std
 
 
+def efficiency_ratio(values: Sequence[float], period: int = 20) -> float | None:
+    """Kaufman Efficiency Ratio over the last ``period`` bars.
+
+    ER = |net change over the window| / sum(|bar-to-bar changes|). It is ~1.0
+    when the market moves in a clean straight line (a strong trend) and ~0.0
+    when it thrashes back and forth (a choppy/ranging market). Used to decide
+    *which* regime we're in — this is the core of the regime-switch strategy
+    that survived out-of-sample in ``scripts/deep_search.py``. Look-ahead free:
+    only past/current closes are read.
+    """
+    if period <= 0 or len(values) < period + 1:
+        return None
+    net = abs(values[-1] - values[-1 - period])
+    noise = sum(abs(values[-1 - i] - values[-2 - i]) for i in range(period))
+    if noise == 0:
+        return 0.0
+    return net / noise
+
+
 def stddev(values: Sequence[float], period: int) -> float | None:
     if len(values) < period:
         return None

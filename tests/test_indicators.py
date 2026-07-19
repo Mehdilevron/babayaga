@@ -8,6 +8,18 @@ def test_sma_basic():
     assert ind.sma([1, 2], 5) is None
 
 
+def test_efficiency_ratio_trend_vs_chop():
+    # A straight line moves with perfect efficiency -> ER == 1.0.
+    line = [1.0 + 0.01 * i for i in range(40)]
+    assert abs(ind.efficiency_ratio(line, 30) - 1.0) < 1e-9
+    # A tight zigzag goes nowhere with lots of motion -> ER ~ 0.
+    zig = [1.02 if i % 2 else 0.98 for i in range(40)]
+    er = ind.efficiency_ratio(zig, 30)
+    assert er is not None and er < 0.1
+    # Not enough data -> None.
+    assert ind.efficiency_ratio([1.0, 1.1], 30) is None
+
+
 def test_ema_tracks_trend():
     up = list(range(1, 60))
     e = ind.ema(up, 10)
