@@ -370,6 +370,11 @@ def _build_parser() -> argparse.ArgumentParser:
                         "on real data via scripts/deep_search.py, not here")
     p.add_argument("--no-browser", action="store_true", dest="no_browser",
                    help="do not auto-open a web browser at the dashboard URL")
+    p.add_argument("--replay", action="store_true",
+                   help="feed REAL historical prices from data/*.csv through the "
+                        "dashboard instead of the synthetic simulator — this is the "
+                        "honest screen: what the bot actually does on real prices. "
+                        "Run scripts/fetch_history.py first to fill data/.")
     return p
 
 
@@ -413,13 +418,41 @@ def main(argv: list[str] | None = None) -> int:
     if realistic:
         print("REALISTIC MODE: real spreads + slippage, weak drift, flip cooldown. "
               "Closest thing to a real account.")
+    _sim_caveat = (args.strategy in ("meanrev", "regime", "ensemble")
+                   and not args.replay)
     print(f"Strategy preset: {args.strategy}"
           + ("  (validated on real daily FX, not this sim — the synthetic drift "
              "here favors 'trend', so judge it on real data via "
-             "scripts/deep_search.py, not this screen)"
-             if args.strategy in ("meanrev", "regime", "ensemble") else ""))
+             "scripts/deep_search.py or --replay, not this screen)"
+             if _sim_caveat else ""))
     os_ = TradingOS(cfg)
     os_.coordinator.specialists = preset_specs
+
+    # --replay: attach REAL historical prices per symbol instead of letting the
+    # OS fall back to its synthetic feed. This turns the dashboard into an
+    # honest live view — the strategy running on real data, not the toy market.
+    if args.replay:
+        from pathlib import Path as _Path
+
+        from babayaga.backtest import load_csv
+        from babayaga.integration.market_data import ReplayFeed
+
+        data_dir = _Path(__file__).resolve().parent.parent / "data"
+        wanted = set(symbols)
+        attached = 0
+        for f in sorted(data_dir.glob("*.csv")):
+            sym, candles = load_csv(f)
+            if candles and sym in wanted:
+                os_.attach_feed(sym, ReplayFeed(candles, interval=args.interval))
+                attached += 1
+        if attached == 0:
+            print("REPLAY: no matching data/*.csv for the requested symbols.\n"
+                  "        Run: python3 scripts/fetch_history.py  (needs internet)")
+            return 1
+        print(f"REPLAY MODE: streaming REAL historical prices for {attached} "
+              f"instrument(s). This screen is the honest one — real data, real "
+              f"costs. No synthetic drift.")
+
     dash = Dashboard(os_, host=args.host, port=args.port)
     if dash.port != args.port:
         print(f"Port {args.port} was busy — serving on {dash.port} instead.")
