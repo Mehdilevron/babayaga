@@ -57,6 +57,14 @@ the owner, never by an assistant.
   Efficiency-Ratio regime detector: trend-follow when trending, fade when
   ranging) is the best.
 
+- **Execution edge-leak found and fixed (2026-07-20).** Same signal, same real
+  prices: the live OS lost ~−17% while deep_search's model made +0.42%, because
+  every trade carried a tight 2×ATR stop + 3×ATR take-profit that fought a
+  reversion strategy. Switching meanrev/regime/ensemble to signal-driven exits
+  (no take-profit, wide 6×ATR catastrophic stop only) turned a full real-data
+  replay of the ensemble from **−17.2% to +25.5%** ($2,000 → $2,509 over ~17
+  years ≈ **+1.4%/yr**). Real, positive, and modest — NOT a daily target.
+
 ## What is NOT proven
 
 - **That the out-of-sample signal is big enough to trade for real.** +0.35%
