@@ -67,8 +67,12 @@ def _require(name: str) -> str:
 
 def main() -> int:
     # EXNESS_SYMBOL may be a single instrument or a comma-separated basket the
-    # bot scans together, e.g. "EUR/USD,GBP/USD,USD/JPY,AUD/USD,USD/CAD".
-    raw = os.environ.get("EXNESS_SYMBOL", "EUR/USD,GBP/USD,USD/JPY,AUD/USD,USD/CAD")
+    # bot scans together. Default = the owner's focused basket: 5 FX majors +
+    # gold. (Gold's min lot is large; MAX_LOT + the min-lot veto keep it sane —
+    # on a small live balance prefer FX, but on demo the basket sizes fine.)
+    raw = os.environ.get(
+        "EXNESS_SYMBOL", "EUR/USD,GBP/USD,USD/JPY,AUD/USD,USD/CAD,XAU/USD"
+    )
     symbols = tuple(s.strip() for s in raw.split(",") if s.strip())
     suffix = os.environ.get("EXNESS_SUFFIX", "")
     confirm_live = os.environ.get("CONFIRM_LIVE", "") == "I_UNDERSTAND"
@@ -160,11 +164,13 @@ def main() -> int:
     # rate-limit direction changes (default 3 bars; FLIP_COOLDOWN=0 disables).
     # Strategy preset. On 17y of real daily FX / 10 instruments, walk-forward
     # and net of spread (see scripts/deep_search.py), 'regime' had the best
-    # positive OUT-OF-SAMPLE median (+0.42%), just ahead of 'meanrev' (+0.35%);
-    # 'trend' loses. So 'regime' is the default. STRATEGY=meanrev or
-    # STRATEGY=trend selects the others. All remain DEMO-gated until weeks of
-    # demo tracking agree with the backtest (MISSION.md).
-    strategy = os.environ.get("STRATEGY", "regime")
+    # single positive OUT-OF-SAMPLE median (+0.42%), ahead of 'meanrev'
+    # (+0.35%); 'trend' loses. 'ensemble' runs regime + meanrev together and
+    # trades only where they agree — a steadier curve across the basket, and
+    # the owner's chosen default. STRATEGY=regime/meanrev/trend selects the
+    # others. All remain DEMO-gated until weeks of demo tracking agree with the
+    # backtest (MISSION.md).
+    strategy = os.environ.get("STRATEGY", "ensemble")
     risk, specialists = strategy_preset(strategy)
     cfg = Config(
         symbols=symbols,

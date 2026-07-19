@@ -361,11 +361,13 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="cap on retained ticks/signals for nonstop runs; trades are never pruned")
     p.add_argument("--realistic", action="store_true",
                    help="~real-account mode: real spreads + slippage, weak drift, flip cooldown")
-    p.add_argument("--strategy", choices=("trend", "meanrev", "regime"), default="trend",
-                   help="strategy preset; 'regime' is the best out-of-sample family on "
-                        "real daily FX (trend-follow when trending, fade when ranging). "
-                        "Note: this simulator's synthetic drift favors 'trend', so judge "
-                        "regime/meanrev on real data via scripts/deep_search.py, not here")
+    p.add_argument("--strategy", choices=("trend", "meanrev", "regime", "ensemble"),
+                   default="trend",
+                   help="strategy preset; 'ensemble' runs regime-switch + mean-reversion "
+                        "together (trades only where they agree); 'regime' is the best "
+                        "single out-of-sample family on real daily FX. Note: this "
+                        "simulator's synthetic drift favors 'trend', so judge the others "
+                        "on real data via scripts/deep_search.py, not here")
     p.add_argument("--no-browser", action="store_true", dest="no_browser",
                    help="do not auto-open a web browser at the dashboard URL")
     return p
@@ -412,10 +414,10 @@ def main(argv: list[str] | None = None) -> int:
         print("REALISTIC MODE: real spreads + slippage, weak drift, flip cooldown. "
               "Closest thing to a real account.")
     print(f"Strategy preset: {args.strategy}"
-          + ("  (best out-of-sample family on real daily FX — note this synthetic "
-             "sim's drift favors 'trend', so judge it on real data via "
-             "scripts/deep_search.py, not here)"
-             if args.strategy in ("meanrev", "regime") else ""))
+          + ("  (validated on real daily FX, not this sim — the synthetic drift "
+             "here favors 'trend', so judge it on real data via "
+             "scripts/deep_search.py, not this screen)"
+             if args.strategy in ("meanrev", "regime", "ensemble") else ""))
     os_ = TradingOS(cfg)
     os_.coordinator.specialists = preset_specs
     dash = Dashboard(os_, host=args.host, port=args.port)

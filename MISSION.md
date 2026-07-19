@@ -18,12 +18,14 @@ being destroyed**, and only risk money on behaviour that real data supports.
 | Capital | **$2,000** |
 | Maximum total loss | **$150** — latching hard stop |
 | On hard stop | Flatten every position, halt, stay halted across restarts until the owner deletes `HALTED.lock` |
-| Strategy preset | `regime-switch` best out-of-sample (+0.42%); `meanrev` close (+0.35%); `trend` loses — demo-gated, see below |
+| Strategy preset | `ensemble` (regime-switch + meanrev, trades only where they agree) is the standing default; `regime-switch` best single OOS (+0.42%), `meanrev` (+0.35%), `trend` loses — all demo-gated, see below |
+| Instrument basket | 5 FX majors + gold: EUR/USD, GBP/USD, USD/JPY, AUD/USD, USD/CAD, XAU/USD (no single stocks) |
 | Timeframe | D1 (the only validated timeframe) |
 | Mode order | real-data research → weeks of demo → only then live |
 
 Live launcher config (VPS): `MAX_TOTAL_LOSS=150`, `EQUITY_FLOOR=1850`,
-`MAX_LOT=0.01`, `STRATEGY=regime` (best OOS; `meanrev` a close alt),
+`MAX_LOT=0.01`, `STRATEGY=ensemble` (default; `regime`/`meanrev` alts),
+`EXNESS_SYMBOL=EUR/USD,GBP/USD,USD/JPY,AUD/USD,USD/CAD,XAU/USD`,
 `TIMEFRAME=D1`, watchdog
 `scripts\run_exness_forever.bat`. `CONFIRM_LIVE=I_UNDERSTAND` is typed only by
 the owner, never by an assistant.

@@ -142,11 +142,24 @@ def regime_switch_target(closes, i, p: Params) -> int:
     return _trend_target(closes, i, p) if er >= p.er_thr else _revert_target(closes, i, p)
 
 
+def ensemble_target(closes, i, p: Params) -> float:
+    """ALL strategies together: average the regime-switch and mean-reversion
+    votes. When they AGREE you get full size (+/-1); when one is flat you get
+    half; when they CONFLICT they cancel to 0. Scaling exposure by agreement is
+    exactly how diversification smooths an equity curve."""
+    return (regime_switch_target(closes, i, p) + _revert_target(closes, i, p)) / 2.0
+
+
 STRATEGIES = {
     "trend":         _trend_target,
     "meanrev":       _revert_target,
     "regime-switch": regime_switch_target,
+    "ensemble":      ensemble_target,
 }
+
+# The owner's focus: 5 FX majors + gold. No single stocks — those were only
+# ever test data. deep_search restricts to these when they're present.
+FOCUS_BASKET = ("EUR/USD", "GBP/USD", "USD/JPY", "AUD/USD", "USD/CAD", "XAU/USD")
 
 
 # ---------------------------------------------------------------------------
@@ -155,7 +168,7 @@ STRATEGIES = {
 def backtest(closes: list[float], target_fn, p: Params, half_spread: float
              ) -> tuple[float, int]:
     equity = 1.0
-    pos = 0
+    pos = 0.0  # may be fractional for the ensemble (agreement-scaled exposure)
     trades = 0
     for i in range(len(closes) - 1):
         tgt = target_fn(closes, i, p)
@@ -217,8 +230,8 @@ def evaluate(series_by_year, spreads, long_only: bool):
     print(f"out-of-sample  : {oos or '(none)'}\n")
 
     rows = []
-    regime_p = None
-    for kind in ("trend", "meanrev", "regime-switch"):
+    ensemble_p = None
+    for kind in ("trend", "meanrev", "regime-switch", "ensemble"):
         if kind == "regime-switch":
             # choose params on IN-SAMPLE only, then lock for OOS (walk-forward)
             best_p, best_s = None, None
@@ -227,8 +240,12 @@ def evaluate(series_by_year, spreads, long_only: bool):
                 if best_s is None or s > best_s:
                     best_s, best_p = s, p
             p = best_p or Params(long_only=long_only)
-            regime_p = p
             note = f"(locked ER_win={p.er_win} ER_thr={p.er_thr} SMA={p.sma_win})"
+        elif kind == "ensemble":
+            # Fixed default params (NOT grid-searched) -> nothing fit to OOS.
+            p = Params(long_only=long_only)
+            ensemble_p = p
+            note = "(regime + meanrev, agreement-weighted)"
         else:
             p = Params(long_only=long_only)
             note = ""
@@ -240,23 +257,23 @@ def evaluate(series_by_year, spreads, long_only: bool):
     for kind, in_med, oos_med, note in rows:
         print(f"{kind:<16}{in_med*100:>11.2f}%{oos_med*100:>15.2f}%   {note}")
 
-    if regime_p is not None and oos:
-        _print_year_curve("regime-switch", regime_p, series_by_year, oos, spreads)
+    if ensemble_p is not None and oos:
+        _print_portfolio_curve("ensemble", ensemble_p, series_by_year, oos, spreads)
     return rows
 
 
-def _print_year_curve(kind, p, series_by_year, years, spreads) -> None:
-    """Honest year-by-year view: regime-switch's real out-of-sample returns.
-
-    This is the screen to look at instead of the simulator — the strategy's
-    actual per-year median return (across all instruments) on REAL prices,
-    net of spread, in the years it was never fit to. A tiny ASCII bar makes
-    the shape of the 'curve' visible; +/- and a running total tell the story.
+def _print_portfolio_curve(kind, p, series_by_year, years, spreads) -> None:
+    """The honest screen: the ensemble traded as ONE equal-weight portfolio
+    across the whole basket, on real prices, net of spread, in years it was
+    never fit to. Shows each year's portfolio return and what $2,000 becomes —
+    a rough shape (equal-weight yearly, no intra-year rebalance), not a promise.
     """
     fn = STRATEGIES[kind]
-    print(f"\n{kind} — real out-of-sample year by year "
-          f"(median across instruments, net of spread):")
-    running = 0.0
+    insts = list(series_by_year)
+    print(f"\n{kind} PORTFOLIO — equal-weight across {len(insts)} instruments "
+          f"({', '.join(insts)}),")
+    print("real out-of-sample, net of spread:")
+    acct = 2000.0
     for y in years:
         rets = []
         for sym, by_year in series_by_year.items():
@@ -266,12 +283,13 @@ def _print_year_curve(kind, p, series_by_year, years, spreads) -> None:
                 rets.append(r)
         if not rets:
             continue
-        med = statistics.median(rets)
-        running += med
-        bar = ("+" if med >= 0 else "-") * min(40, int(abs(med) * 1000))
-        print(f"  {y}  {med*100:+6.2f}%  cum {running*100:+6.2f}%  {bar}")
-    print("  (cum = simple sum of yearly medians; a rough equity-curve shape, "
-          "not a compounded account)")
+        port = sum(rets) / len(rets)          # equal-weight allocation
+        acct *= (1.0 + port)
+        bar = ("+" if port >= 0 else "-") * min(40, int(abs(port) * 1000))
+        print(f"  {y}  {port*100:+6.2f}%   ${acct:8.2f}   {bar}")
+    total = acct / 2000.0 - 1.0
+    print(f"  $2,000 -> ${acct:.2f}  ({total*100:+.1f}% over {len(years)} yrs, "
+          f"rough: equal-weight yearly, no intra-year rebalance/compounding)")
 
 
 # ---------------------------------------------------------------------------
@@ -313,6 +331,8 @@ def main() -> int:
                     help="sanity check on random walks (must show no edge)")
     ap.add_argument("--long-only", action="store_true",
                     help="never short (for stocks/gold; FX can short)")
+    ap.add_argument("--all-instruments", action="store_true", dest="all_instruments",
+                    help="use every data/*.csv instead of the focused 5 FX + gold basket")
     args = ap.parse_args()
 
     if args.noise:
@@ -331,6 +351,14 @@ def main() -> int:
         print("(That needs open internet — it will NOT work in the sandbox, "
               "only on your Mac.)")
         return 1
+    # Focus on the owner's basket (5 FX majors + gold) unless --all-instruments.
+    if not args.all_instruments:
+        focused = {s: series[s] for s in FOCUS_BASKET if s in series}
+        if focused:
+            missing = [s for s in FOCUS_BASKET if s not in series]
+            series = focused
+            if missing:
+                print(f"(note: {', '.join(missing)} not in data/ — skipped)")
     print(f"Loaded {len(series)} instruments: {', '.join(series)}\n")
     evaluate(series, HALF_SPREAD, args.long_only)
     print("\nHow to read this (no marketing, per MISSION.md):")

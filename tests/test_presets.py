@@ -34,6 +34,17 @@ def test_regime_preset_aliases():
         assert isinstance(specs[0], RegimeSwitchAgent)
 
 
+def test_ensemble_preset_runs_all_strategies_together():
+    risk, specs = strategy_preset("ensemble")
+    assert risk.min_trend_strength == 0.0
+    kinds = {type(s) for s in specs}
+    assert RegimeSwitchAgent in kinds and MeanReversionAgent in kinds
+    # Aliases resolve to the same committee.
+    for alias in ("portfolio", "combo", "all", "ENSEMBLE"):
+        _r, s = strategy_preset(alias)
+        assert {type(x) for x in s} == kinds
+
+
 def test_unknown_preset_raises():
     with pytest.raises(ValueError):
         strategy_preset("hodl")
