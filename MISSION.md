@@ -30,6 +30,45 @@ Live launcher config (VPS): `MAX_TOTAL_LOSS=150`, `EQUITY_FLOOR=1850`,
 `scripts\run_exness_forever.bat`. `CONFIRM_LIVE=I_UNDERSTAND` is typed only by
 the owner, never by an assistant.
 
+## The configuration that first turned a real-data profit (2026-07-20)
+
+This is the exact, reproducible setup behind the first positive real-data run
+($2,000 → $2,509, +25.5% over the full ~17-year replay ≈ +1.4%/yr). **Save
+every parameter — this is the reference config.** Honest scope: it is a
+backtest of the live execution over real prices, not yet a demo or live result,
+and the year-by-year robustness table is still to be confirmed.
+
+| Parameter | Value | Why |
+|---|---|---|
+| Strategy | `ensemble` = RegimeSwitchAgent + MeanReversionAgent, coordinator confidence-vote | trades only where both agree, flat when they conflict |
+| Basket | EUR/USD, GBP/USD, USD/JPY, AUD/USD, USD/CAD, XAU/USD | 5 FX majors + gold; no single stocks |
+| Timeframe | D1 (daily bars) | the only validated timeframe |
+| **Exit policy** | **signal-driven: `atr_target_mult=0` (no take-profit), `atr_stop_mult=6.0` (wide catastrophic stop only)** | THE fix — a tight stop/target fought the reversion thesis and turned winners into losses (−17% → +25.5%) |
+| Risk per trade | `risk_per_trade=0.01` (1% of equity, ATR-sized) | wider stop ⇒ smaller size for same $ risk |
+| Min confidence | `0.15` (ensemble) | require agreement before trading |
+| Flip cooldown | `3` bars (realistic mode) | stop paying spread on bar-to-bar churn |
+| Regime detector | Kaufman ER: `er_win=30`, `er_thr=0.35`, `sma_win=20` | trend-follow when ER≥0.35, fade when below |
+| Mean-reversion | Bollinger `period=20`, `entry_z=1.5` | fade stretched z-scores |
+| Costs | realistic per-pair spread + slippage | net-of-cost, not optimistic |
+| Starting cash | $2,000 | owner capital |
+
+Reproduce the profitable real-data view (live brake off so the whole history
+plays; the $150 hard stop is a LIVE guard, not a backtest setting):
+
+```bash
+git pull
+python3 -m babayaga.dashboard --replay --max-loss 0 --cash 2000 --realistic \
+  --strategy ensemble \
+  --symbol "EUR/USD,GBP/USD,USD/JPY,AUD/USD,USD/CAD,XAU/USD" --steps 0
+# and the year-by-year table (the strength test):
+python3 -m babayaga.backtest data/*.csv --cash 2000
+```
+
+Iron-rule reminder: **+1.4%/yr is real and modest, NOT a $500/day target.**
+$500/day on $2,000 is +25%/day — impossible without account-destroying
+leverage. Small and steady is what survives; do not re-tune this to chase a
+bigger number (that is overfitting, iron rule #4). Next gate is the demo.
+
 ## What is PROVEN (by test or measurement)
 
 - Safety machinery works end-to-end: latching hard stop (flattens + freezes,
