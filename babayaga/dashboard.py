@@ -150,7 +150,22 @@ class Dashboard:
         for topic in _STREAM_TOPICS:
             self.os.on(topic, self._make_forwarder(topic))
         handler = type("BoundHandler", (_Handler,), {"broadcaster": self.broadcaster})
-        self._server = ThreadingHTTPServer((host, port), handler)
+        # If the requested port is already in use (e.g. a previous dashboard is
+        # still running), walk forward to the next free port instead of dying
+        # with "Address already in use". self.port is updated to the real one.
+        last_err: OSError | None = None
+        for candidate in range(port, port + 20):
+            try:
+                self._server = ThreadingHTTPServer((host, candidate), handler)
+                self.port = candidate
+                break
+            except OSError as exc:  # port busy -> try the next one
+                last_err = exc
+        else:
+            raise OSError(
+                f"no free port in {port}..{port + 19} on {host}. "
+                f"Close the other dashboard, or pass --port. ({last_err})"
+            )
         self._server.daemon_threads = True
 
     def _make_forwarder(self, topic: Topic):
@@ -399,8 +414,10 @@ def main(argv: list[str] | None = None) -> int:
     os_ = TradingOS(cfg)
     os_.coordinator.specialists = preset_specs
     dash = Dashboard(os_, host=args.host, port=args.port)
+    if dash.port != args.port:
+        print(f"Port {args.port} was busy — serving on {dash.port} instead.")
     dash.serve_forever_in_thread()
-    _print_access_banner(args.host, args.port)
+    _print_access_banner(args.host, dash.port)
     print("Ctrl-C to stop.")
     try:
         asyncio.run(os_.run())
