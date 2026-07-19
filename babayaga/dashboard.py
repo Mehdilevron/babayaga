@@ -452,6 +452,12 @@ def main(argv: list[str] | None = None) -> int:
         print(f"REPLAY MODE: streaming REAL historical prices for {attached} "
               f"instrument(s). This screen is the honest one — real data, real "
               f"costs. No synthetic drift.")
+        if args.max_loss > 0:
+            print(f"  ⚠  --max-loss ${args.max_loss:.0f} is a LIVE circuit breaker "
+                  f"(protect ${args.cash:.0f} in real trading). Replaying many YEARS "
+                  f"of history, normal drawdown will breach it early and FREEZE the "
+                  f"rest of the replay — so you see a halt, not the strategy's full "
+                  f"result. To watch the whole real curve, add  --max-loss 0 .")
 
     dash = Dashboard(os_, host=args.host, port=args.port)
     if dash.port != args.port:
