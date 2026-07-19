@@ -99,9 +99,10 @@ VPS. To stop it, RDP back in and press **Ctrl+C** in the Command Prompt.
 
 ## Live config with a hard $200 stop (example: $2,000 account)
 
-This is the setup for "trade my real account, but if I'm ever down $200 total,
-flatten everything and stop until I say go again." Run it on the VPS after your
-demo results justify it:
+This is the owner's standing setup (see MISSION.md): "trade my real account,
+but if I'm ever down $150 total, flatten everything and stop until I say go
+again." Run it on the VPS only after real-data research AND demo results
+justify it:
 
 ```bat
 set EXNESS_LOGIN=your-LIVE-number
@@ -109,8 +110,8 @@ set EXNESS_PASSWORD=your-live-password
 set EXNESS_SERVER=your-live-server
 set EXNESS_SYMBOL=EUR/USD,GBP/USD,USD/JPY,AUD/USD,USD/CAD
 set MAX_LOT=0.01
-set MAX_TOTAL_LOSS=200
-set EQUITY_FLOOR=1800
+set MAX_TOTAL_LOSS=150
+set EQUITY_FLOOR=1850
 set FLIP_COOLDOWN=3
 set ALERT_WEBHOOK=https://hooks.slack.com/services/...   (optional halt alert)
 set CONFIRM_LIVE=I_UNDERSTAND
@@ -119,9 +120,9 @@ scripts\run_exness_forever.bat
 
 Notes on the guards:
 
-- `EQUITY_FLOOR=1800` is the most robust stop: an absolute equity level that
+- `EQUITY_FLOOR=1850` is the most robust stop: an absolute equity level that
   survives crashes, restarts and reboots with zero bookkeeping.
-- `MAX_TOTAL_LOSS=200` measures from your **first** session's equity — the
+- `MAX_TOTAL_LOSS=150` measures from your **first** session's equity — the
   anchor is persisted in `babayaga_state.json`, so a crash/restart does *not*
   grant a fresh $200 budget.
 - `FLIP_COOLDOWN=3` stops bar-to-bar direction churn (every reversal pays the
