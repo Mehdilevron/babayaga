@@ -217,6 +217,7 @@ def evaluate(series_by_year, spreads, long_only: bool):
     print(f"out-of-sample  : {oos or '(none)'}\n")
 
     rows = []
+    regime_p = None
     for kind in ("trend", "meanrev", "regime-switch"):
         if kind == "regime-switch":
             # choose params on IN-SAMPLE only, then lock for OOS (walk-forward)
@@ -226,6 +227,7 @@ def evaluate(series_by_year, spreads, long_only: bool):
                 if best_s is None or s > best_s:
                     best_s, best_p = s, p
             p = best_p or Params(long_only=long_only)
+            regime_p = p
             note = f"(locked ER_win={p.er_win} ER_thr={p.er_thr} SMA={p.sma_win})"
         else:
             p = Params(long_only=long_only)
@@ -237,7 +239,39 @@ def evaluate(series_by_year, spreads, long_only: bool):
     print(f"{'strategy':<16}{'in-sample':>12}{'OUT-OF-SAMPLE':>16}   notes")
     for kind, in_med, oos_med, note in rows:
         print(f"{kind:<16}{in_med*100:>11.2f}%{oos_med*100:>15.2f}%   {note}")
+
+    if regime_p is not None and oos:
+        _print_year_curve("regime-switch", regime_p, series_by_year, oos, spreads)
     return rows
+
+
+def _print_year_curve(kind, p, series_by_year, years, spreads) -> None:
+    """Honest year-by-year view: regime-switch's real out-of-sample returns.
+
+    This is the screen to look at instead of the simulator — the strategy's
+    actual per-year median return (across all instruments) on REAL prices,
+    net of spread, in the years it was never fit to. A tiny ASCII bar makes
+    the shape of the 'curve' visible; +/- and a running total tell the story.
+    """
+    fn = STRATEGIES[kind]
+    print(f"\n{kind} — real out-of-sample year by year "
+          f"(median across instruments, net of spread):")
+    running = 0.0
+    for y in years:
+        rets = []
+        for sym, by_year in series_by_year.items():
+            closes = by_year.get(y)
+            if closes and len(closes) >= 100:
+                r, _ = backtest(closes, fn, p, spreads.get(sym, DEFAULT_HALF_SPREAD))
+                rets.append(r)
+        if not rets:
+            continue
+        med = statistics.median(rets)
+        running += med
+        bar = ("+" if med >= 0 else "-") * min(40, int(abs(med) * 1000))
+        print(f"  {y}  {med*100:+6.2f}%  cum {running*100:+6.2f}%  {bar}")
+    print("  (cum = simple sum of yearly medians; a rough equity-curve shape, "
+          "not a compounded account)")
 
 
 # ---------------------------------------------------------------------------
