@@ -68,6 +68,19 @@ def test_risk_agent_sizes_by_fractional_risk():
     assert d.take_profit is not None and d.take_profit > hist[-1].close
 
 
+def test_no_take_profit_when_target_mult_zero_gives_signal_exit():
+    # atr_target_mult=0 -> no take-profit: winners run until the signal exits.
+    # A wide stop still exists as a catastrophic backstop.
+    risk = RiskAgent(RiskLimits(atr_stop_mult=6.0, atr_target_mult=0.0,
+                                min_confidence=0.0))
+    hist = _uptrend()
+    d = risk.assess("EUR/USD", Side.BUY, 1.0, "t", hist, 100_000, 0)
+    assert d.side is Side.BUY and d.size > 0
+    assert d.stop_loss is not None            # catastrophic backstop kept
+    assert d.take_profit is None              # no cap on winners
+    assert "signal-exit" in d.rationale
+
+
 def test_regime_filter_vetoes_chop_and_counter_trend():
     risk = RiskAgent(RiskLimits(min_confidence=0.0, min_trend_strength=1.0))
     up = _uptrend()  # strong uptrend: fast EMA well above slow

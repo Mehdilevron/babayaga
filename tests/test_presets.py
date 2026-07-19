@@ -10,7 +10,9 @@ from babayaga.integration.market_data import typical_price, typical_spread
 def test_meanrev_preset():
     risk, specs = strategy_preset("meanrev")
     assert risk.min_trend_strength == 0.0
-    assert risk.atr_stop_mult == risk.atr_target_mult == 2.0
+    # Signal-driven exit: no take-profit, wide catastrophic stop only.
+    assert risk.atr_target_mult == 0.0
+    assert risk.atr_stop_mult >= 4.0
     assert len(specs) == 1 and isinstance(specs[0], MeanReversionAgent)
 
 
@@ -24,7 +26,8 @@ def test_trend_preset():
 def test_regime_preset():
     risk, specs = strategy_preset("regime")
     assert risk.min_trend_strength == 0.0  # the agent decides regime itself
-    assert risk.atr_target_mult > risk.atr_stop_mult  # trend leg gets room
+    assert risk.atr_target_mult == 0.0     # signal-driven exit, winners run
+    assert risk.atr_stop_mult >= 4.0       # wide catastrophic backstop only
     assert len(specs) == 1 and isinstance(specs[0], RegimeSwitchAgent)
 
 

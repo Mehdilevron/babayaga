@@ -24,19 +24,27 @@ from babayaga.agents.technical import TechnicalAgent
 def strategy_preset(kind: str) -> tuple[RiskLimits, list[SpecialistAgent]]:
     """Return (risk limits, specialist committee) for a named strategy family."""
     kind = kind.strip().lower()
+    # Exit policy for the reversion-based families (meanrev, regime, ensemble):
+    # these were validated in deep_search with SIGNAL-driven exits and NO fixed
+    # stop/target. A tight ATR stop stops them out on the extra stretch right
+    # before the reversion, and a fixed take-profit caps the reversion — both
+    # convert winners into losers. So: no take-profit (atr_target_mult=0 -> let
+    # winners run to the signal exit) and only a WIDE catastrophic stop
+    # (atr_stop_mult=6) as a gap backstop. A wider stop also shrinks position
+    # size for the same fixed $ risk, so this is not more leverage — it is less.
+    SIGNAL_EXIT_STOP = 6.0
     if kind in ("ensemble", "portfolio", "combo", "all"):
         # ALL strategies working together as one committee. The coordinator
         # votes their signals: when regime-switch and mean-reversion AGREE the
         # signal is strong; when they conflict they cancel toward FLAT — so the
         # ensemble only trades high-conviction setups and sits out the rest.
         # This is the diversification the owner asked for: two edges + many
-        # instruments smooth each other's rough patches. min_trend_strength=0
-        # (the agents judge regime themselves); balanced R:R.
+        # instruments smooth each other's rough patches.
         return (
             RiskLimits(
                 min_trend_strength=0.0,
-                atr_stop_mult=2.0,
-                atr_target_mult=3.0,
+                atr_stop_mult=SIGNAL_EXIT_STOP,
+                atr_target_mult=0.0,  # signal-driven exit; let winners run
                 min_confidence=0.15,
             ),
             [RegimeSwitchAgent(), MeanReversionAgent()],
@@ -45,25 +53,25 @@ def strategy_preset(kind: str) -> tuple[RiskLimits, list[SpecialistAgent]]:
         # Best out-of-sample family in scripts/deep_search.py on real data
         # (+0.42% OOS median, walk-forward). The agent decides trend-vs-range
         # itself via the Efficiency Ratio, so the risk layer must NOT also
-        # impose a trend filter (min_trend_strength=0). Balanced R:R: a touch
-        # wider target than stop, since the trend leg wants room to run.
+        # impose a trend filter (min_trend_strength=0).
         return (
             RiskLimits(
                 min_trend_strength=0.0,
-                atr_stop_mult=2.0,
-                atr_target_mult=3.0,
+                atr_stop_mult=SIGNAL_EXIT_STOP,
+                atr_target_mult=0.0,  # signal-driven exit; let winners run
                 min_confidence=0.1,
             ),
             [RegimeSwitchAgent()],
         )
     if kind == "meanrev":
-        # Fade Bollinger extremes; symmetric R:R (reversion targets the mean,
-        # not a runaway trend), no trend filter (it trades AGAINST stretches).
+        # Fade Bollinger extremes, no trend filter (it trades AGAINST stretches).
+        # Exit on signal (price returning to the mean), not a fixed target that
+        # would cap the reversion; wide catastrophic stop only.
         return (
             RiskLimits(
                 min_trend_strength=0.0,
-                atr_stop_mult=2.0,
-                atr_target_mult=2.0,
+                atr_stop_mult=SIGNAL_EXIT_STOP,
+                atr_target_mult=0.0,  # signal-driven exit; let winners run
                 min_confidence=0.1,
             ),
             [MeanReversionAgent()],

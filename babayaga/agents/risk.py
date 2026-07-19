@@ -122,7 +122,11 @@ class RiskAgent:
                 return flat("regime filter: signal against the prevailing trend")
 
         stop_dist = self.limits.atr_stop_mult * atr
-        target_dist = self.limits.atr_target_mult * atr
+        # atr_target_mult <= 0 means "no take-profit": let a winner run until the
+        # signal itself says exit/reverse. This matches the model that actually
+        # showed an edge on real data (deep_search), where a fixed take-profit
+        # would have capped the reversion the strategy is built to capture.
+        target_dist = self.limits.atr_target_mult * atr if self.limits.atr_target_mult > 0 else None
 
         # Fractional-risk position sizing.
         risk_budget = equity * self.limits.risk_per_trade
@@ -139,8 +143,9 @@ class RiskAgent:
 
         sign = raw_side.sign
         stop = price - sign * stop_dist
-        target = price + sign * target_dist
+        target = price + sign * target_dist if target_dist is not None else None
 
+        target_str = f"{target:.5f}" if target is not None else "signal-exit"
         return Decision(
             symbol=symbol,
             side=raw_side,
@@ -148,9 +153,9 @@ class RiskAgent:
             confidence=confidence,
             rationale=(
                 f"{rationale} | size {units:,.0f}u risk {self.limits.risk_per_trade:.0%} "
-                f"stop {stop:.5f} target {target:.5f} (ATR {atr:.5f})"
+                f"stop {stop:.5f} target {target_str} (ATR {atr:.5f})"
             ),
             contributing=contributing,
             stop_loss=round(stop, 6),
-            take_profit=round(target, 6),
+            take_profit=round(target, 6) if target is not None else None,
         )
