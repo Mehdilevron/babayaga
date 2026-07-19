@@ -364,6 +364,8 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--strategy", choices=("trend", "meanrev"), default="trend",
                    help="strategy preset; 'meanrev' is the research pick on real daily FX "
                         "(note: this simulator's synthetic drift favors 'trend')")
+    p.add_argument("--no-browser", action="store_true", dest="no_browser",
+                   help="do not auto-open a web browser at the dashboard URL")
     return p
 
 
@@ -418,6 +420,19 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Port {args.port} was busy — serving on {dash.port} instead.")
     dash.serve_forever_in_thread()
     _print_access_banner(args.host, dash.port)
+    # Auto-open a browser so "the dashboard doesn't open" can't happen. Uses the
+    # loopback address even when bound to 0.0.0.0 (that isn't a browsable host).
+    if not args.no_browser:
+        open_host = "127.0.0.1" if args.host in ("0.0.0.0", "::") else args.host
+        url = f"http://{open_host}:{dash.port}"
+        try:
+            import webbrowser
+            if webbrowser.open(url):
+                print(f"Opening {url} in your browser…")
+            else:
+                print(f"Could not auto-open a browser — go to {url} manually.")
+        except Exception:
+            print(f"Could not auto-open a browser — go to {url} manually.")
     print("Ctrl-C to stop.")
     try:
         asyncio.run(os_.run())
