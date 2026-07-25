@@ -47,8 +47,11 @@ class RiskLimits:
 class RiskAgent:
     name = "risk"
 
-    def __init__(self, limits: RiskLimits | None = None) -> None:
+    def __init__(self, limits: RiskLimits | None = None, news_guard=None) -> None:
         self.limits = limits or RiskLimits()
+        #: Optional NewsGuard. When set, new entries are vetoed inside the
+        #: blackout window around high-impact economic events. None = off.
+        self.news_guard = news_guard
         self._peak_equity: float | None = None
         self.halted = False
 
@@ -81,6 +84,12 @@ class RiskAgent:
             return flat(f"RISK HALT: drawdown breaker tripped ({rationale})")
         if raw_side is Side.FLAT:
             return flat(f"no directional edge ({rationale})")
+        # News blackout: stand aside around high-impact events (existing
+        # positions keep their protective stops; we just don't OPEN into news).
+        if self.news_guard is not None and history:
+            blocked, why = self.news_guard.blocked(symbol, history[-1].timestamp)
+            if blocked:
+                return flat(why)
         if confidence < self.limits.min_confidence:
             return flat(
                 f"confidence {confidence:.2f} < min {self.limits.min_confidence:.2f}"

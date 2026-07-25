@@ -370,6 +370,14 @@ def _build_parser() -> argparse.ArgumentParser:
                         "on real data via scripts/deep_search.py, not here")
     p.add_argument("--no-browser", action="store_true", dest="no_browser",
                    help="do not auto-open a web browser at the dashboard URL")
+    p.add_argument("--news-calendar", dest="news_calendar", default=None,
+                   help="path to an economic-calendar CSV (date,impact,currency in UTC); "
+                        "the bot stands aside around high-impact news for the affected "
+                        "currencies")
+    p.add_argument("--news-before", dest="news_before", type=float, default=30.0,
+                   help="minutes before a news event to stop opening trades")
+    p.add_argument("--news-after", dest="news_after", type=float, default=15.0,
+                   help="minutes after a news event to stay flat (spike + wide spread)")
     p.add_argument("--replay", action="store_true",
                    help="feed REAL historical prices from data/*.csv through the "
                         "dashboard instead of the synthetic simulator — this is the "
@@ -408,7 +416,13 @@ def main(argv: list[str] | None = None) -> int:
         sim_drift_scale=0.2 if realistic else 1.0,
         flip_cooldown_bars=3 if realistic else 0,
         hard_stop_loss=args.max_loss if args.max_loss > 0 else None,
+        news_calendar_path=args.news_calendar,
+        news_minutes_before=args.news_before,
+        news_minutes_after=args.news_after,
     )
+    if args.news_calendar:
+        print(f"NEWS GUARD: standing aside {args.news_before:.0f}m before / "
+              f"{args.news_after:.0f}m after high-impact events in {args.news_calendar}")
     if args.max_loss > 0:
         print(f"hard stop: lose ${args.max_loss:.0f} -> flatten everything and halt until restart")
     from babayaga.agents.presets import strategy_preset

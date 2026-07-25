@@ -35,6 +35,14 @@ class Config:
     # Risk configuration.
     risk: RiskLimits = field(default_factory=RiskLimits)
 
+    # Economic-calendar / news blackout. When news_calendar_path points at a
+    # CSV of events (date,impact,currency), the OS stands aside around
+    # high-impact news for the affected currencies. None/missing = off.
+    news_calendar_path: str | None = None
+    news_minutes_before: float = 30.0
+    news_minutes_after: float = 15.0
+    news_min_impact: str = "high"
+
     # Persistence. ":memory:" keeps everything in RAM (nothing written to disk).
     memory_path: str = ":memory:"
     # Retention caps for the two high-volume tables so nonstop/ultra-fast runs

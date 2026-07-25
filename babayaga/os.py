@@ -73,7 +73,7 @@ class TradingOS:
         )
 
         # --- agent workflow -------------------------------------------
-        self.risk = RiskAgent(self.config.risk)
+        self.risk = RiskAgent(self.config.risk, news_guard=self._build_news_guard())
         specialists = [TechnicalAgent(), SentimentAgent()]
         self.coordinator = Coordinator(specialists, self.risk)
         self.execution = ExecutionAgent(
@@ -153,6 +153,22 @@ class TradingOS:
                 open_positions=self.broker.open_position_count(),
                 halted=self.risk.halted or getattr(self.broker, "halted_hard", False),
             ),
+        )
+
+    def _build_news_guard(self):
+        """Build a NewsGuard from the configured calendar CSV, or None if unset."""
+        path = self.config.news_calendar_path
+        if not path:
+            return None
+        from babayaga.agents.news import EconomicCalendar, NewsGuard
+
+        cal = EconomicCalendar.from_csv(path)
+        log.info("news guard: loaded %d events from %s", len(cal.events), path)
+        return NewsGuard(
+            cal,
+            minutes_before=self.config.news_minutes_before,
+            minutes_after=self.config.news_minutes_after,
+            min_impact=self.config.news_min_impact,
         )
 
     def _position_units(self, symbol: str) -> float:

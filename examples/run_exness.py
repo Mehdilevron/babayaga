@@ -177,6 +177,11 @@ def main() -> int:
         sim_steps=0,
         flip_cooldown_bars=int(os.environ.get("FLIP_COOLDOWN", "3")),
         risk=risk,
+        # NEWS_CALENDAR=path to a CSV (date,impact,currency UTC) turns on the
+        # news blackout: the bot stands aside around high-impact events.
+        news_calendar_path=os.environ.get("NEWS_CALENDAR") or None,
+        news_minutes_before=float(os.environ.get("NEWS_BEFORE", "30")),
+        news_minutes_after=float(os.environ.get("NEWS_AFTER", "15")),
     )
     # Optional expert overrides of the preset's risk parameters.
     if "TREND_FILTER" in os.environ:
