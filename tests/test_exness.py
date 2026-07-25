@@ -1,0 +1,319 @@
+"""Offline tests for the Exness/MT5 adapter using a fake ``mt5`` module."""
+
+import asyncio
+import types
+
+import pytest
+
+from babayaga.integration.exness import (
+    ExnessMT5Broker,
+    ExnessMT5Feed,
+    Mt5Error,
+    to_mt5_symbol,
+)
+from babayaga.kernel.events import Order, Side
+
+# MT5 constant values (as the real package defines them).
+DEMO, CONTEST, REAL = 0, 1, 2
+RETCODE_DONE = 10009
+
+
+def _account(trade_mode=DEMO, balance=100.0, equity=100.0):
+    return types.SimpleNamespace(
+        trade_mode=trade_mode, balance=balance, equity=equity, login=123
+    )
+
+
+def _symbol_info():
+    return types.SimpleNamespace(
+        volume_min=0.01, volume_max=100.0, volume_step=0.01, trade_contract_size=100.0
+    )
+
+
+class FakeMT5:
+    """Mimics the subset of the MetaTrader5 module the adapter uses."""
+
+    ACCOUNT_TRADE_MODE_DEMO = DEMO
+    ACCOUNT_TRADE_MODE_REAL = REAL
+    ORDER_TYPE_BUY = 0
+    ORDER_TYPE_SELL = 1
+    TRADE_ACTION_DEAL = 1
+    TRADE_RETCODE_DONE = RETCODE_DONE
+    ORDER_TIME_GTC = 0
+    ORDER_FILLING_IOC = 1
+    TIMEFRAME_M1 = 1
+
+    def __init__(self, trade_mode=DEMO, rates=None, order_retcode=RETCODE_DONE,
+                 balance=100.0, equity=100.0, positions=None):
+        self._account = _account(trade_mode, balance=balance, equity=equity)
+        self._rates = rates or []
+        self._order_retcode = order_retcode
+        self._positions = positions or []
+        self.sent_requests = []
+
+    def positions_get(self, *args, **kwargs):
+        return list(self._positions)
+
+    def account_info(self):
+        return self._account
+
+    def last_error(self):
+        return (0, "ok")
+
+    def symbol_info(self, symbol):
+        return _symbol_info()
+
+    def symbol_select(self, symbol, enable):
+        return True
+
+    def copy_rates_from_pos(self, symbol, timeframe, start, count):
+        return self._rates[-count:]
+
+    def order_send(self, request):
+        self.sent_requests.append(request)
+        return types.SimpleNamespace(
+            retcode=self._order_retcode,
+            price=request["price"],
+            volume=request["volume"],
+            order=1,
+            comment="ok",
+        )
+
+
+def _bar(t, o, h, l, c, v=100):
+    return {"time": float(t), "open": o, "high": h, "low": l, "close": c, "tick_volume": v}
+
+
+def test_symbol_conversion():
+    assert to_mt5_symbol("XAU/USD") == "XAUUSD"
+    assert to_mt5_symbol("XAU/USD", "m") == "XAUUSDm"
+    assert to_mt5_symbol("EUR/USD") == "EURUSD"
+
+
+def test_feed_emits_completed_bars_only():
+    rates = [
+        _bar(1, 2000, 2001, 1999, 2000.5),
+        _bar(2, 2000.5, 2002, 2000, 2001.5),
+        _bar(3, 2001.5, 2003, 2001, 2002.5),  # last row = in-progress, skipped in warmup
+    ]
+    feed = ExnessMT5Feed(FakeMT5(rates=rates), "XAU/USD", warmup_bars=3, max_bars=2)
+
+    async def collect():
+        out = []
+        async for c in feed.stream():
+            out.append(c)
+        return out
+
+    candles = asyncio.run(collect())
+    assert [c.close for c in candles] == [2000.5, 2001.5]
+    assert candles[0].symbol == "XAU/USD"
+
+
+def test_demo_account_trades_freely():
+    mt5 = FakeMT5(trade_mode=DEMO)
+    broker = ExnessMT5Broker(mt5)
+    assert broker.is_live is False
+    assert broker.blocked is False
+    fill = broker.submit(Order("XAU/USD", Side.BUY, 100), mark_price=2000.0)
+    assert fill is not None
+    assert fill.price == 2000.0
+    # 100 units / 100 per lot = 1.0 lot, BUY type.
+    req = mt5.sent_requests[0]
+    assert req["volume"] == 1.0
+    assert req["type"] == FakeMT5.ORDER_TYPE_BUY
+    assert req["symbol"] == "XAUUSD"
+
+
+def test_real_account_is_blocked_without_confirmation():
+    mt5 = FakeMT5(trade_mode=REAL)
+    broker = ExnessMT5Broker(mt5)  # confirm_live defaults False
+    assert broker.is_live is True
+    assert broker.blocked is True
+    with pytest.raises(Mt5Error):
+        broker.submit(Order("XAU/USD", Side.BUY, 100), mark_price=2000.0)
+    # Nothing was ever sent to the terminal.
+    assert mt5.sent_requests == []
+
+
+def test_real_account_trades_when_confirmed():
+    mt5 = FakeMT5(trade_mode=REAL)
+    broker = ExnessMT5Broker(mt5, confirm_live=True)
+    assert broker.blocked is False
+    fill = broker.submit(Order("XAU/USD", Side.SELL, 100), mark_price=2000.0)
+    assert fill is not None
+    assert mt5.sent_requests[0]["type"] == FakeMT5.ORDER_TYPE_SELL
+
+
+def test_lot_sizing_respects_min_volume():
+    mt5 = FakeMT5(trade_mode=DEMO)
+    broker = ExnessMT5Broker(mt5)
+    # 1 unit / 100 per lot = 0.01 lot -> clamped up to volume_min 0.01.
+    broker.submit(Order("XAU/USD", Side.BUY, 1), mark_price=2000.0)
+    assert mt5.sent_requests[0]["volume"] == 0.01
+
+
+def test_stop_and_target_attached_to_request():
+    mt5 = FakeMT5(trade_mode=DEMO)
+    broker = ExnessMT5Broker(mt5)
+    broker.submit(
+        Order("XAU/USD", Side.BUY, 100, stop_loss=1990.0, take_profit=2020.0),
+        mark_price=2000.0,
+    )
+    req = mt5.sent_requests[0]
+    assert req["sl"] == 1990.0
+    assert req["tp"] == 2020.0
+
+
+def test_rejected_order_returns_none():
+    mt5 = FakeMT5(trade_mode=DEMO, order_retcode=10004)  # requote / not done
+    broker = ExnessMT5Broker(mt5)
+    assert broker.submit(Order("XAU/USD", Side.BUY, 100), mark_price=2000.0) is None
+
+
+def test_max_lot_caps_order_size():
+    mt5 = FakeMT5(trade_mode=DEMO)
+    broker = ExnessMT5Broker(mt5, max_lot=0.05)
+    # 100 units / 100 per lot = 1.0 lot, but capped to 0.05.
+    broker.submit(Order("XAU/USD", Side.BUY, 100), mark_price=2000.0)
+    assert mt5.sent_requests[0]["volume"] == 0.05
+
+
+def test_daily_loss_kill_switch_blocks_new_trades():
+    mt5 = FakeMT5(trade_mode=DEMO, balance=100.0, equity=100.0)
+    broker = ExnessMT5Broker(mt5, daily_max_loss=10.0)
+    # First trade is allowed while within the loss budget.
+    assert broker.submit(Order("XAU/USD", Side.BUY, 100), mark_price=2000.0) is not None
+    # Simulate the account dropping $15 (> $10 daily cap).
+    mt5._account.equity = 85.0
+    blocked = broker.submit(Order("XAU/USD", Side.BUY, 100), mark_price=2000.0)
+    assert blocked is None
+    assert broker.halted_daily is True
+
+
+def test_daily_guard_inactive_when_unset():
+    mt5 = FakeMT5(trade_mode=DEMO, balance=100.0, equity=100.0)
+    broker = ExnessMT5Broker(mt5)  # no daily_max_loss
+    mt5._account.equity = 1.0  # huge loss
+    # Without a configured limit, trading continues.
+    assert broker.submit(Order("XAU/USD", Side.BUY, 100), mark_price=2000.0) is not None
+    assert broker.halted_daily is False
+
+
+def _pos(symbol="EURUSD", volume=0.10, is_long=True, ticket=555):
+    return types.SimpleNamespace(
+        symbol=symbol, volume=volume,
+        type=FakeMT5.ORDER_TYPE_BUY if is_long else FakeMT5.ORDER_TYPE_SELL,
+        ticket=ticket,
+    )
+
+
+def test_total_loss_latching_stop_flattens_and_blocks():
+    halts = []
+    mt5 = FakeMT5(trade_mode=DEMO, balance=2000.0, equity=2000.0,
+                  positions=[_pos("EURUSD", 0.10, True, 1), _pos("GBPUSD", 0.05, False, 2)])
+    broker = ExnessMT5Broker(mt5, max_total_loss=200.0, on_halt=lambda r: halts.append(r))
+    # A first trade is fine while inside the loss budget.
+    assert broker.submit(Order("EUR/USD", Side.BUY, 100), mark_price=1.10) is not None
+    n_before = len(mt5.sent_requests)
+
+    # Account drops $250 (> $200 hard limit).
+    mt5._account.equity = 1750.0
+    blocked = broker.submit(Order("EUR/USD", Side.BUY, 100), mark_price=1.10)
+    assert blocked is None
+    assert broker.halted_total is True
+    assert halts and "total loss" in halts[0]
+    # It flattened BOTH open positions (opposite-side closes carrying the ticket).
+    flattens = [r for r in mt5.sent_requests[n_before:] if r.get("comment") == "kill-switch flatten"]
+    assert len(flattens) == 2
+    assert {f["position"] for f in flattens} == {1, 2}
+    assert flattens[0]["type"] == FakeMT5.ORDER_TYPE_SELL   # closing the long
+    assert flattens[1]["type"] == FakeMT5.ORDER_TYPE_BUY    # closing the short
+
+
+def test_total_loss_stays_latched_after_recovery():
+    mt5 = FakeMT5(trade_mode=DEMO, balance=2000.0, equity=2000.0)
+    broker = ExnessMT5Broker(mt5, max_total_loss=200.0)
+    mt5._account.equity = 1700.0
+    broker.submit(Order("EUR/USD", Side.BUY, 100), mark_price=1.10)  # trips
+    assert broker.halted_total is True
+    # Even if the account recovers, the latch stays engaged.
+    mt5._account.equity = 2100.0
+    assert broker.submit(Order("EUR/USD", Side.BUY, 100), mark_price=1.10) is None
+    assert broker.halted_total is True
+
+
+def test_force_halt_blocks_trading():
+    mt5 = FakeMT5(trade_mode=DEMO, balance=2000.0, equity=2000.0)
+    broker = ExnessMT5Broker(mt5, max_total_loss=200.0)
+    broker.force_halt("existing lock")
+    assert broker.submit(Order("EUR/USD", Side.BUY, 100), mark_price=1.10) is None
+    assert broker.halted_total is True
+
+
+def test_symbol_roundtrip_with_suffix():
+    from babayaga.integration.exness import from_mt5_symbol
+
+    assert from_mt5_symbol("EURUSDm", "m") == "EUR/USD"
+    assert from_mt5_symbol("XAUUSD") == "XAU/USD"
+    assert from_mt5_symbol(to_mt5_symbol("GBP/JPY", "z"), "z") == "GBP/JPY"
+
+
+def test_below_min_lot_is_vetoed_not_rounded_up():
+    mt5 = FakeMT5(trade_mode=DEMO)
+    broker = ExnessMT5Broker(mt5)
+    # 0.4 units / contract 100 = 0.004 lots < volume_min 0.01 -> skip, no order.
+    assert broker.submit(Order("XAU/USD", Side.BUY, 0.4), mark_price=2000.0) is None
+    assert mt5.sent_requests == []
+
+
+def test_equity_floor_latches_hard_stop():
+    halts = []
+    mt5 = FakeMT5(trade_mode=DEMO, balance=2000.0, equity=2000.0)
+    broker = ExnessMT5Broker(mt5, equity_floor=1800.0, on_halt=lambda r: halts.append(r))
+    assert broker.submit(Order("EUR/USD", Side.BUY, 100), mark_price=1.10) is not None
+    mt5._account.equity = 1799.0
+    assert broker.submit(Order("EUR/USD", Side.BUY, 100), mark_price=1.10) is None
+    assert broker.halted_total is True
+    assert halts and "floor" in halts[0]
+
+
+def test_loss_anchor_survives_restart():
+    # Simulates a crash-restart: the account already lost $150; the new process
+    # is told the ORIGINAL anchor, so only $50 of budget remains.
+    mt5 = FakeMT5(trade_mode=DEMO, balance=1850.0, equity=1850.0)
+    broker = ExnessMT5Broker(mt5, max_total_loss=200.0, loss_anchor_equity=2000.0)
+    assert broker.submit(Order("EUR/USD", Side.BUY, 100), mark_price=1.10) is not None
+    mt5._account.equity = 1795.0  # total loss from anchor = 205 >= 200
+    assert broker.submit(Order("EUR/USD", Side.BUY, 100), mark_price=1.10) is None
+    assert broker.halted_total is True
+
+
+def test_guards_run_on_mark_to_market_not_only_submit():
+    # A halt must trigger while merely holding positions, without a new order.
+    mt5 = FakeMT5(trade_mode=DEMO, balance=2000.0, equity=2000.0,
+                  positions=[_pos("EURUSD", 0.10, True, 9)])
+    broker = ExnessMT5Broker(mt5, max_total_loss=200.0, reconcile_interval=0.0)
+    mt5._account.equity = 1750.0
+    broker.mark_to_market("EUR/USD", 1.10)
+    assert broker.halted_total is True
+    flattens = [r for r in mt5.sent_requests if r.get("comment") == "kill-switch flatten"]
+    assert len(flattens) == 1 and flattens[0]["position"] == 9
+
+
+def test_sync_positions_mirrors_server_state():
+    # Server has one long EURUSD position; contract size 100 (FakeMT5 default).
+    mt5 = FakeMT5(trade_mode=DEMO, positions=[_pos("EURUSD", 0.10, True, 4)])
+    broker = ExnessMT5Broker(mt5, reconcile_interval=0.0)
+    broker.mark_to_market("EUR/USD", 1.10)
+    assert broker.positions["EUR/USD"].size == 10.0  # 0.10 lot * 100 contract
+    # Server-side close (e.g. take-profit filled on the server): mirror empties.
+    mt5._positions = []
+    broker.mark_to_market("EUR/USD", 1.10)
+    assert broker.open_position_count() == 0
+
+
+def test_filling_mode_respects_symbol_capabilities():
+    mt5 = FakeMT5(trade_mode=DEMO)
+    broker = ExnessMT5Broker(mt5)
+    # FakeMT5 symbol_info has no filling_mode attr -> default IOC.
+    assert broker._filling_mode("EURUSD") == FakeMT5.ORDER_FILLING_IOC
