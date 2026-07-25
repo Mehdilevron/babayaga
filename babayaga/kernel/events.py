@@ -80,6 +80,12 @@ class Decision:
     contributing: tuple[Signal, ...] = ()
     stop_loss: float | None = None
     take_profit: float | None = None
+    # Trailing-stop-to-breakeven (absolute PRICE distances, None = off): once the
+    # trade is in profit by ``trail_activate`` the stop jumps to breakeven, then
+    # trails ``trail_distance`` behind the best price. It only ever ratchets in
+    # the profitable direction — it can never widen the loss.
+    trail_activate: float | None = None
+    trail_distance: float | None = None
     timestamp: float = field(default_factory=time.time)
 
 
@@ -92,6 +98,8 @@ class Order:
     limit_price: float | None = None
     stop_loss: float | None = None
     take_profit: float | None = None
+    trail_activate: float | None = None
+    trail_distance: float | None = None
     reason: str = ""
     timestamp: float = field(default_factory=time.time)
 

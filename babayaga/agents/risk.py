@@ -42,6 +42,13 @@ class RiskLimits:
     # Volatility floor: skip dead markets where ATR is a tiny fraction of price.
     # There's nothing to capture and the spread dominates. 0.0 = off.
     min_atr_pct: float = 0.0
+    # Trailing stop to breakeven (in ATR units; 0 = off). Once a trade is in
+    # profit by ``trail_activate_atr`` ATRs, the stop moves to breakeven and then
+    # trails ``trail_distance_atr`` ATRs behind the peak — locking gains while
+    # letting winners run. Kept WIDE by default so it protects profit without
+    # reintroducing the tight-stop whipsaw that the signal-exit fix removed.
+    trail_activate_atr: float = 0.0
+    trail_distance_atr: float = 3.0
 
 
 class RiskAgent:
@@ -154,6 +161,12 @@ class RiskAgent:
         stop = price - sign * stop_dist
         target = price + sign * target_dist if target_dist is not None else None
 
+        # Optional trailing-to-breakeven distances (absolute price units).
+        trail_activate = trail_distance = None
+        if self.limits.trail_activate_atr > 0:
+            trail_activate = self.limits.trail_activate_atr * atr
+            trail_distance = self.limits.trail_distance_atr * atr
+
         target_str = f"{target:.5f}" if target is not None else "signal-exit"
         return Decision(
             symbol=symbol,
@@ -167,4 +180,6 @@ class RiskAgent:
             contributing=contributing,
             stop_loss=round(stop, 6),
             take_profit=round(target, 6) if target is not None else None,
+            trail_activate=trail_activate,
+            trail_distance=trail_distance,
         )

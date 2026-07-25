@@ -190,6 +190,11 @@ def main() -> int:
         cfg.risk.atr_stop_mult = float(os.environ["ATR_STOP"])
     if "ATR_TARGET" in os.environ:
         cfg.risk.atr_target_mult = float(os.environ["ATR_TARGET"])
+    # TRAIL_ACTIVATE (in ATRs) > 0 turns on trailing-to-breakeven; TRAIL_DISTANCE
+    # sets how far behind the peak it rides. Off by default (validated config).
+    if float(os.environ.get("TRAIL_ACTIVATE", "0")) > 0:
+        cfg.risk.trail_activate_atr = float(os.environ["TRAIL_ACTIVATE"])
+        cfg.risk.trail_distance_atr = float(os.environ.get("TRAIL_DISTANCE", "3"))
     os_ = TradingOS(cfg)
     os_.coordinator.specialists = specialists
 

@@ -100,6 +100,44 @@ def test_equity_floor_off_by_default():
     assert b.halted_hard is False
 
 
+def test_trailing_moves_to_breakeven_then_locks_profit():
+    b = PaperBroker(starting_cash=100_000, spread=0.0)
+    # Long with a wide catastrophic stop, plus trailing: arm at +0.0010 profit,
+    # then trail 0.0010 behind the peak.
+    b.submit(
+        Order("EUR/USD", Side.BUY, 10_000, stop_loss=1.0900,
+              trail_activate=0.0010, trail_distance=0.0010),
+        mark_price=1.1000,
+    )
+    assert b.positions["EUR/USD"].stop_loss == 1.0900  # far catastrophic stop
+
+    # Price rises +5 pips: not yet at the +10 pip activation -> stop unchanged.
+    b.mark_to_market("EUR/USD", 1.1005)
+    assert b.positions["EUR/USD"].stop_loss == 1.0900
+
+    # Price rises +12 pips: armed -> stop ratchets to at least breakeven, and
+    # trails 10 pips behind the 1.1012 peak (=1.1002), the tighter/safer of the two.
+    b.mark_to_market("EUR/USD", 1.1012)
+    assert b.positions["EUR/USD"].stop_loss >= 1.1000  # never below breakeven
+    assert round(b.positions["EUR/USD"].stop_loss, 4) == 1.1002
+
+    # Price pulls back: the trailing stop must NOT move back down (ratchet only).
+    b.mark_to_market("EUR/USD", 1.1006)
+    assert round(b.positions["EUR/USD"].stop_loss, 4) == 1.1002
+
+    # Deeper pullback through the trail -> protective exit locks in the gain.
+    b.mark_to_market("EUR/USD", 1.1001)
+    assert b.open_position_count() == 0
+    assert b.realized_pnl > 0  # closed in profit, not at the original loss
+
+
+def test_trailing_off_by_default_keeps_original_stop():
+    b = PaperBroker(starting_cash=100_000, spread=0.0)
+    b.submit(Order("EUR/USD", Side.BUY, 10_000, stop_loss=1.0900), mark_price=1.1000)
+    b.mark_to_market("EUR/USD", 1.1100)  # big profit, but no trailing configured
+    assert b.positions["EUR/USD"].stop_loss == 1.0900  # unchanged
+
+
 def test_averaging_up_updates_avg_price():
     b = PaperBroker(starting_cash=100_000, spread=0.0)
     b.submit(Order("EUR/USD", Side.BUY, 10_000), mark_price=1.1000)

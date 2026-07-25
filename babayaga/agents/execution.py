@@ -88,6 +88,8 @@ class ExecutionAgent:
             size=decision.size,
             stop_loss=decision.stop_loss,
             take_profit=decision.take_profit,
+            trail_activate=decision.trail_activate,
+            trail_distance=decision.trail_distance,
             reason=decision.rationale[:120],
         )
         fill = self.broker.submit(opening, mark_price)

@@ -21,6 +21,10 @@ class Position:
     avg_price: float = 0.0
     stop_loss: float | None = None
     take_profit: float | None = None
+    trail_activate: float | None = None   # profit distance to arm breakeven
+    trail_distance: float | None = None   # trail this far behind the peak
+    _armed: bool = False                  # has the breakeven jump happened yet
+    _peak: float | None = None            # best price seen since entry
 
     @property
     def side(self) -> Side:
@@ -100,8 +104,34 @@ class PaperBroker(Broker):
             return mark - half
         return mark
 
+    def _update_trailing(self, symbol: str, price: float) -> None:
+        """Ratchet the stop toward profit: jump to breakeven once far enough in
+        profit, then trail behind the peak. The stop NEVER moves against the
+        position, so this can only reduce risk / lock gains — never widen a loss.
+        """
+        pos = self.positions.get(symbol)
+        if not pos or pos.size == 0 or pos.trail_distance is None:
+            return
+        long = pos.size > 0
+        pos._peak = price if pos._peak is None else (
+            max(pos._peak, price) if long else min(pos._peak, price)
+        )
+        profit = (pos._peak - pos.avg_price) if long else (pos.avg_price - pos._peak)
+        if not pos._armed and pos.trail_activate is not None and profit >= pos.trail_activate:
+            pos._armed = True
+            be = pos.avg_price
+            pos.stop_loss = be if pos.stop_loss is None else (
+                max(pos.stop_loss, be) if long else min(pos.stop_loss, be)
+            )
+        if pos._armed:
+            trailed = pos._peak - pos.trail_distance if long else pos._peak + pos.trail_distance
+            pos.stop_loss = trailed if pos.stop_loss is None else (
+                max(pos.stop_loss, trailed) if long else min(pos.stop_loss, trailed)
+            )
+
     def mark_to_market(self, symbol: str, price: float) -> None:
         self._marks[symbol] = price
+        self._update_trailing(symbol, price)
         self._check_protective_exits(symbol, price)
         self._check_equity_floor()
 
@@ -173,10 +203,14 @@ class PaperBroker(Broker):
             self.closed_trade_pnls.append(pnl)
 
         # Update average price when opening or adding in the same direction.
+        opening = prev_size == 0 and new_size != 0
         if new_size == 0:
             pos.avg_price = 0.0
             pos.stop_loss = None
             pos.take_profit = None
+            pos.trail_activate = pos.trail_distance = None
+            pos._armed = False
+            pos._peak = None
         elif prev_size == 0 or (prev_size > 0) == (signed > 0):
             # Weighted average entry.
             total_cost = pos.avg_price * abs(prev_size) + fill_price * abs(signed)
@@ -189,6 +223,12 @@ class PaperBroker(Broker):
             pos.stop_loss = order.stop_loss
         if order.take_profit is not None:
             pos.take_profit = order.take_profit
+        # Attach trailing config on a fresh open and reset the ratchet state.
+        if opening:
+            pos.trail_activate = order.trail_activate
+            pos.trail_distance = order.trail_distance
+            pos._armed = False
+            pos._peak = None
 
         commission = self.commission_per_unit * order.size
         self.cash -= commission

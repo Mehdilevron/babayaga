@@ -370,6 +370,12 @@ def _build_parser() -> argparse.ArgumentParser:
                         "on real data via scripts/deep_search.py, not here")
     p.add_argument("--no-browser", action="store_true", dest="no_browser",
                    help="do not auto-open a web browser at the dashboard URL")
+    p.add_argument("--trail-activate", dest="trail_activate", type=float, default=0.0,
+                   help="trailing-to-breakeven: profit (in ATRs) at which the stop jumps "
+                        "to breakeven, then trails. 0 = off (default). Try ~1.5")
+    p.add_argument("--trail-distance", dest="trail_distance", type=float, default=3.0,
+                   help="how far (in ATRs) the trailing stop rides behind the peak once "
+                        "armed. Keep wide (~3) so it locks profit without whipsawing")
     p.add_argument("--news-calendar", dest="news_calendar", default=None,
                    help="path to an economic-calendar CSV (date,impact,currency in UTC); "
                         "the bot stands aside around high-impact news for the affected "
@@ -429,6 +435,11 @@ def main(argv: list[str] | None = None) -> int:
 
     preset_risk, preset_specs = strategy_preset(args.strategy)
     cfg.risk = preset_risk
+    if args.trail_activate > 0:
+        cfg.risk.trail_activate_atr = args.trail_activate
+        cfg.risk.trail_distance_atr = args.trail_distance
+        print(f"TRAILING: arm breakeven at +{args.trail_activate:.1f} ATR, then trail "
+              f"{args.trail_distance:.1f} ATR behind the peak (ratchet only).")
     if realistic:
         print("REALISTIC MODE: real spreads + slippage, weak drift, flip cooldown. "
               "Closest thing to a real account.")
