@@ -67,6 +67,7 @@ class PaperBroker(Broker):
         commission_per_unit: float = 0.0,
         slippage: float = 0.0,        # extra price units lost against the taker per fill
         equity_floor: float | None = None,  # LATCHING hard stop at this equity
+        profit_ceiling: float | None = None,  # LATCHING profit-lock at this equity
     ) -> None:
         self.starting_cash = starting_cash
         self.cash = starting_cash
@@ -74,7 +75,9 @@ class PaperBroker(Broker):
         self.commission_per_unit = commission_per_unit
         self.slippage = slippage
         self.equity_floor = equity_floor
+        self.profit_ceiling = profit_ceiling
         self.halted_hard = False
+        self.halt_reason: str | None = None
         self.positions: dict[str, Position] = {}
         self.realized_pnl = 0.0
         self._marks: dict[str, float] = {}
@@ -134,25 +137,40 @@ class PaperBroker(Broker):
         self._update_trailing(symbol, price)
         self._check_protective_exits(symbol, price)
         self._check_equity_floor()
+        self._check_profit_target()
+
+    def _flatten_and_halt(self, reason: str) -> None:
+        """Close every open position and latch the broker so nothing trades
+        until a restart. Shared by the loss hard-stop and the profit-lock."""
+        for sym, pos in list(self.positions.items()):
+            if pos.size != 0:
+                mark = self._marks.get(sym, pos.avg_price)
+                fill = self.submit(
+                    Order(sym, Side.SELL if pos.size > 0 else Side.BUY,
+                          abs(pos.size), reason=reason),
+                    mark,
+                )
+                if fill:
+                    self._protective_fills.append(fill)
+        self.halted_hard = True
+        self.halt_reason = reason
 
     def _check_equity_floor(self) -> None:
         """LATCHING hard stop: at the floor, flatten everything and refuse all
         further orders ("stop and don't trade until my command")."""
         if self.equity_floor is None or self.halted_hard:
             return
-        if self.equity > self.equity_floor:
+        if self.equity <= self.equity_floor:
+            self._flatten_and_halt("hard_stop")
+
+    def _check_profit_target(self) -> None:
+        """LATCHING profit-lock: once equity reaches the ceiling, bank the win —
+        flatten everything and stop trading until a restart. The mirror of the
+        hard stop, for gains instead of losses."""
+        if self.profit_ceiling is None or self.halted_hard:
             return
-        for sym, pos in list(self.positions.items()):
-            if pos.size != 0:
-                mark = self._marks.get(sym, pos.avg_price)
-                fill = self.submit(
-                    Order(sym, Side.SELL if pos.size > 0 else Side.BUY,
-                          abs(pos.size), reason="hard_stop"),
-                    mark,
-                )
-                if fill:
-                    self._protective_fills.append(fill)
-        self.halted_hard = True
+        if self.equity >= self.profit_ceiling:
+            self._flatten_and_halt("profit_target")
 
     # -- protective exits -------------------------------------------------
     def _check_protective_exits(self, symbol: str, price: float) -> None:

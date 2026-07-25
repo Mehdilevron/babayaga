@@ -221,6 +221,7 @@ _INDEX_HTML = """<!doctype html>
   <span class="badge" id="conn">connecting…</span>
   <span class="badge" style="background:#241a24;color:#e6a0c0">PAPER — simulated</span>
   <span class="badge" id="halt" style="display:none;background:#3a1420;color:#ff8f9f">⛔ TRADING HALTED — loss limit / drawdown breaker</span>
+  <span class="badge" id="banked" style="display:none;background:#123a1e;color:#7fe6a0">✅ PROFIT TARGET REACHED — win banked, trading stopped</span>
 </header>
 <div class="wrap">
   <div class="card">
@@ -276,7 +277,9 @@ es.onmessage = e => {
     $('open').textContent=data.open_positions;
     const r=(data.equity-start)/start*100;
     $('ret').textContent=fmt(r)+'%'; $('ret').className='v '+(r>=0?'pos':'neg');
-    $('halt').style.display = data.halted ? 'inline' : 'none';
+    const banked = data.halted && data.halt_reason === 'profit_target';
+    $('banked').style.display = banked ? 'inline' : 'none';
+    $('halt').style.display = (data.halted && !banked) ? 'inline' : 'none';
     drawChart();
   } else if(topic==='tick'){
     tickCount++; $('ticks').textContent=tickCount;
@@ -370,6 +373,9 @@ def _build_parser() -> argparse.ArgumentParser:
                         "on real data via scripts/deep_search.py, not here")
     p.add_argument("--no-browser", action="store_true", dest="no_browser",
                    help="do not auto-open a web browser at the dashboard URL")
+    p.add_argument("--take-profit", dest="take_profit", type=float, default=0.0,
+                   help="LATCHING profit-lock: make this much profit and the bot banks "
+                        "it — flattens everything and stops until restart. 0 = off")
     p.add_argument("--trail-activate", dest="trail_activate", type=float, default=0.0,
                    help="trailing-to-breakeven: profit (in ATRs) at which the stop jumps "
                         "to breakeven, then trails. 0 = off (default). Try ~1.5")
@@ -422,6 +428,7 @@ def main(argv: list[str] | None = None) -> int:
         sim_drift_scale=0.2 if realistic else 1.0,
         flip_cooldown_bars=3 if realistic else 0,
         hard_stop_loss=args.max_loss if args.max_loss > 0 else None,
+        profit_target=args.take_profit if args.take_profit > 0 else None,
         news_calendar_path=args.news_calendar,
         news_minutes_before=args.news_before,
         news_minutes_after=args.news_after,
@@ -431,6 +438,8 @@ def main(argv: list[str] | None = None) -> int:
               f"{args.news_after:.0f}m after high-impact events in {args.news_calendar}")
     if args.max_loss > 0:
         print(f"hard stop: lose ${args.max_loss:.0f} -> flatten everything and halt until restart")
+    if args.take_profit > 0:
+        print(f"profit-lock: make ${args.take_profit:.0f} -> bank it, flatten and halt until restart")
     from babayaga.agents.presets import strategy_preset
 
     preset_risk, preset_specs = strategy_preset(args.strategy)

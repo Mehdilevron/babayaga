@@ -24,6 +24,10 @@ class Config:
     # and the paper broker flattens everything and refuses all further trades.
     # None = off. (The Exness broker has its own MAX_TOTAL_LOSS equivalent.)
     hard_stop_loss: float | None = None
+    # LATCHING profit-lock in account currency: make this much profit from
+    # starting cash and the broker banks it — flattens everything and stops
+    # until a restart. None = off (let winners keep compounding).
+    profit_target: float | None = None
 
     # Data window each agent sees.
     history_window: int = 250

@@ -70,6 +70,11 @@ class TradingOS:
                 if self.config.hard_stop_loss is None
                 else self.config.starting_cash - self.config.hard_stop_loss
             ),
+            profit_ceiling=(
+                None
+                if self.config.profit_target is None
+                else self.config.starting_cash + self.config.profit_target
+            ),
         )
 
         # --- agent workflow -------------------------------------------
@@ -152,6 +157,7 @@ class TradingOS:
                 realized_pnl=self.broker.realized_pnl,
                 open_positions=self.broker.open_position_count(),
                 halted=self.risk.halted or getattr(self.broker, "halted_hard", False),
+                halt_reason=getattr(self.broker, "halt_reason", None),
             ),
         )
 

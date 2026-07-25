@@ -124,4 +124,7 @@ class AccountSnapshot:
     # True when trading is frozen (drawdown breaker or hard stop) — surfaces
     # the halt on dashboards instead of the bot silently going quiet.
     halted: bool = False
+    # Why trading halted: "profit_target" (a win — banked), else a loss/drawdown
+    # stop. Lets the UI show a green "profit locked" instead of a red alarm.
+    halt_reason: str | None = None
     timestamp: float = field(default_factory=time.time)

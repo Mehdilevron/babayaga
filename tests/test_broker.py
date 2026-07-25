@@ -93,6 +93,27 @@ def test_equity_floor_hard_stop_flattens_and_latches():
     assert b.halted_hard is True
 
 
+def test_profit_target_banks_the_win_and_latches():
+    b = PaperBroker(starting_cash=1000.0, spread=0.0, profit_ceiling=1100.0)
+    b.submit(Order("EUR/USD", Side.BUY, 100_000), mark_price=1.1000)
+    # Price rises 20 pips -> ~+$200 -> equity ~1200 >= ceiling 1100.
+    b.mark_to_market("EUR/USD", 1.1020)
+    assert b.halted_hard is True
+    assert b.halt_reason == "profit_target"
+    assert b.open_position_count() == 0  # everything flattened -> win banked
+    fills = b.pop_protective_fills()
+    assert any(f.order_reason == "profit_target" for f in fills)
+    # Latched: no new order accepted even if the market keeps moving.
+    assert b.submit(Order("EUR/USD", Side.BUY, 1000), mark_price=1.1020) is None
+
+
+def test_profit_target_off_by_default():
+    b = PaperBroker(starting_cash=1000.0, spread=0.0)
+    b.submit(Order("EUR/USD", Side.BUY, 100_000), mark_price=1.1000)
+    b.mark_to_market("EUR/USD", 1.1100)  # +$1000, but no ceiling configured
+    assert b.halted_hard is False
+
+
 def test_equity_floor_off_by_default():
     b = PaperBroker(starting_cash=1000.0, spread=0.0)
     b.submit(Order("EUR/USD", Side.BUY, 100_000), mark_price=1.1000)
