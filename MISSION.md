@@ -79,6 +79,13 @@ bigger number (that is overfitting, iron rule #4). Next gate is the demo.
   backtests ran feeds sequentially instead of concurrently.
 - On real trending stock data, **mean-reversion loses badly** (expected: it
   fades trends).
+- **"$500/day" / martingale bots go to $0 — tested (2026-07-26).** Simulated
+  500 accounts running the martingale engine those bots use (double the stake
+  after each loss to grind a fixed daily target): **500/500 blew to zero**,
+  after 2–5 days of looking like +$500/day. The steady-profit bot and the
+  account-wipe bot are the same bot. There is no capital/tuning that makes
+  $500/day safe on a small account — it is ~+25%/day, only reachable with
+  ruinous leverage. Do not build or chase it.
 - **First honest out-of-sample signal (2026-07-20).** `scripts/deep_search.py`
   on 17 years of real prices across 10 instruments, net of spread,
   walk-forward (params locked on 2009–2018 before scoring 2019–2026), median
