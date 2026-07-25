@@ -97,23 +97,55 @@ VPS. To stop it, RDP back in and press **Ctrl+C** in the Command Prompt.
 
 ---
 
-## Live config with a hard $200 stop (example: $2,000 account)
+## The owner's standing LIVE structure ($2,000 account)
 
-This is the owner's standing setup (see MISSION.md): "trade my real account,
-but if I'm ever down $150 total, flatten everything and stop until I say go
-again." Run it on the VPS only after real-data research AND demo results
-justify it:
+This is the complete, current configuration (see MISSION.md) — the winning
+ensemble, the 5-FX-+-gold basket, signal-driven exits, the $150 latching hard
+stop, plus the optional news guard and trailing-to-breakeven. **The demo and
+live commands are byte-for-byte identical except the login and the one
+`CONFIRM_LIVE` line** — that is the whole point: what you prove on demo is
+exactly what runs live.
+
+### Step 1 — run it on DEMO first (same config, virtual money)
+
+```bat
+set EXNESS_LOGIN=your-DEMO-number
+set EXNESS_PASSWORD=your-demo-password
+set EXNESS_SERVER=your-demo-server
+set EXNESS_SYMBOL=EUR/USD,GBP/USD,USD/JPY,AUD/USD,USD/CAD,XAU/USD
+set STRATEGY=ensemble
+set MAX_LOT=0.01
+set MAX_TOTAL_LOSS=150
+set EQUITY_FLOOR=1850
+set FLIP_COOLDOWN=3
+rem Optional: stand aside around high-impact news (export a calendar CSV first)
+set NEWS_CALENDAR=data\calendar.csv
+rem Optional: trailing-to-breakeven (test with vs without before trusting)
+rem set TRAIL_ACTIVATE=1.5
+rem set TRAIL_DISTANCE=3
+set ALERT_WEBHOOK=https://hooks.slack.com/services/...   (optional halt alert)
+scripts\run_exness_forever.bat
+```
+
+Leave `CONFIRM_LIVE` **unset** — on a demo account it isn't needed, and the
+broker will trade the demo book freely. Let it run for **weeks**, until you've
+seen enough trades (aim for ~30+) across different market conditions, and the
+demo's realized P&L broadly tracks the backtest. This is the proof.
+
+### Step 2 — go live (only after the demo agrees)
+
+Identical, with the **live** login and the one deliberate line **you** type:
 
 ```bat
 set EXNESS_LOGIN=your-LIVE-number
 set EXNESS_PASSWORD=your-live-password
 set EXNESS_SERVER=your-live-server
-set EXNESS_SYMBOL=EUR/USD,GBP/USD,USD/JPY,AUD/USD,USD/CAD
+set EXNESS_SYMBOL=EUR/USD,GBP/USD,USD/JPY,AUD/USD,USD/CAD,XAU/USD
+set STRATEGY=ensemble
 set MAX_LOT=0.01
 set MAX_TOTAL_LOSS=150
 set EQUITY_FLOOR=1850
 set FLIP_COOLDOWN=3
-set ALERT_WEBHOOK=https://hooks.slack.com/services/...   (optional halt alert)
 set CONFIRM_LIVE=I_UNDERSTAND
 scripts\run_exness_forever.bat
 ```
@@ -132,8 +164,8 @@ Notes on the guards:
   stays stopped.
 - `ALERT_WEBHOOK` (optional) receives a JSON POST the moment a hard stop trips.
 
-- **`MAX_TOTAL_LOSS=200`** — the latching hard stop. The moment total loss hits
-  $200, the bot **closes every open position and stops trading**. It writes a
+- **`MAX_TOTAL_LOSS=150`** — the latching hard stop. The moment total loss hits
+  $150, the bot **closes every open position and stops trading**. It writes a
   `HALTED.lock` file and **stays stopped even if it restarts or the VPS reboots**.
 - **To resume** after a hard stop (your command to start again): delete the lock
   and relaunch.
