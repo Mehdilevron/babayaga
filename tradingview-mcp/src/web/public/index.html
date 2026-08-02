@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>tradingview-mcp chart</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: #0f1117;
+        font-family: -apple-system, system-ui, sans-serif;
+      }
+      #header {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 36px;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 0 12px;
+        color: #d1d4dc;
+        font-size: 13px;
+        background: #131722;
+        border-bottom: 1px solid #1f2330;
+        z-index: 10;
+      }
+      #chart-container {
+        position: absolute;
+        top: 36px;
+        left: 0;
+        right: 0;
+        bottom: 0;
+      }
+      .shape-overlay {
+        position: absolute;
+        pointer-events: none;
+        box-sizing: border-box;
+      }
+      .shape-overlay .shape-label {
+        position: absolute;
+        top: -16px;
+        left: 4px;
+        font-size: 11px;
+        white-space: nowrap;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="header">
+      <strong id="symbol-label">--</strong>
+      <span id="timeframe-label">--</span>
+      <span id="status-label" style="margin-left: auto; opacity: 0.6">connecting...</span>
+    </div>
+    <div id="chart-container"></div>
+    <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
+    <script src="/chart.js"></script>
+  </body>
+</html>

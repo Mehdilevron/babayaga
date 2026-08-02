@@ -1,0 +1,29 @@
+{
+  "name": "tradingview-mcp",
+  "version": "1.0.0",
+  "description": "MCP server exposing chart analysis tools (OHLCV, quotes, shape drawing) backed by a self-hosted Lightweight Charts page.",
+  "type": "module",
+  "main": "dist/server.js",
+  "bin": {
+    "tradingview-mcp": "dist/server.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json && mkdir -p dist/web/public && cp -r src/web/public/* dist/web/public/",
+    "start": "node dist/server.js",
+    "dev": "tsc -p tsconfig.json --watch"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "open": "^11.0.0",
+    "ws": "^8.21.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.3",
+    "@types/ws": "^8.18.1",
+    "typescript": "^6.0.3"
+  }
+}
