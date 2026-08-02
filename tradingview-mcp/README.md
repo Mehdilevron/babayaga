@@ -139,11 +139,23 @@ trades and is not financial advice. Verify any signal yourself.
    setups; every 15 minutes is fine if you want to reduce Claude API calls:
 
    ```
-   # Every 5 minutes (recommended for 15m chart setups — lowest latency)
+   # BTCUSDT every 5 minutes
    */5 * * * * NTFY_TOPIC=my-own-random-slug /absolute/path/to/tradingview-mcp/scripts/check_signal.sh
 
-   # Every 15 minutes (fewer API calls, up to 15-min delay on a signal)
-   */15 * * * * NTFY_TOPIC=my-own-random-slug /absolute/path/to/tradingview-mcp/scripts/check_signal.sh
+   # XAUUSD every 5 minutes (requires TWELVE_DATA_API_KEY in tradingview-bg env -- see below)
+   */5 * * * * SYMBOL=XAUUSD NTFY_TOPIC=my-own-random-slug /absolute/path/to/tradingview-mcp/scripts/check_signal.sh
+   ```
+
+   To add XAUUSD support, re-register the background server with your Twelve
+   Data key (get a free key at twelvedata.com):
+
+   ```bash
+   claude mcp remove tradingview-bg -s local
+   claude mcp add tradingview-bg \
+     -e TRADINGVIEW_MCP_NO_OPEN=1 \
+     -e PORT=4488 \
+     -e TWELVE_DATA_API_KEY=your-key-here \
+     -- node /absolute/path/to/tradingview-mcp/dist/server.js
    ```
 
 ### Environment variables
@@ -151,15 +163,14 @@ trades and is not financial advice. Verify any signal yourself.
 | Variable | Purpose |
 | --- | --- |
 | `NTFY_TOPIC` | **Required.** Your own ntfy.sh topic name. |
-| `SYMBOL` | Symbol to analyze (default: `BTCUSDT`). |
+| `SYMBOL` | Symbol to analyze (default: `BTCUSDT`). Use `XAUUSD` for gold (requires `TWELVE_DATA_API_KEY`). |
 | `MCP_SERVER_NAME` | Name the background MCP server was registered under (default: `tradingview-bg`). |
 | `CLAUDE_BIN` | Path to the `claude` CLI (default: `claude`). |
 | `LOG_FILE` | Path to the log file (default: `scripts/signal_check.log` next to the script). |
 
-The script only finalizes a BUY/SELL signal once a 15m liquidity sweep, an
-active (non-mitigated) inversion FVG, and a lower-timeframe (5m or 1m) entry
-trigger all confirm it — otherwise it logs `signal=NONE` and exits without
-notifying.
+The script only finalizes a BUY/SELL signal when all 4 ICT steps confirm:
+liquidity sweep → higher-timeframe FVG → CISD → iFVG tapped on 5m/1m.
+Otherwise it logs `signal=NONE` and exits without notifying.
 
 ## Architecture
 
