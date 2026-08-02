@@ -135,9 +135,14 @@ trades and is not financial advice. Verify any signal yourself.
    Check `scripts/signal_check.log` for the result, and the browser tab from
    step 1 for the drawn shapes.
 
-4. Schedule it, e.g. every 15 minutes via cron:
+4. Schedule it. Every 5 minutes gives the lowest signal latency for 15m-chart
+   setups; every 15 minutes is fine if you want to reduce Claude API calls:
 
    ```
+   # Every 5 minutes (recommended for 15m chart setups — lowest latency)
+   */5 * * * * NTFY_TOPIC=my-own-random-slug /absolute/path/to/tradingview-mcp/scripts/check_signal.sh
+
+   # Every 15 minutes (fewer API calls, up to 15-min delay on a signal)
    */15 * * * * NTFY_TOPIC=my-own-random-slug /absolute/path/to/tradingview-mcp/scripts/check_signal.sh
    ```
 

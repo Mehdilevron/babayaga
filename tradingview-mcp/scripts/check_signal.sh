@@ -88,7 +88,7 @@ TOOL_PREFIX="mcp__${MCP_SERVER_NAME}__"
 RAW_OUTPUT=$("$CLAUDE_BIN" -p \
   --allowedTools "${TOOL_PREFIX}chart_set_symbol" "${TOOL_PREFIX}chart_set_timeframe" "${TOOL_PREFIX}data_get_ohlcv" "${TOOL_PREFIX}quote_get" "${TOOL_PREFIX}draw_shape" "${TOOL_PREFIX}chart_get_state" \
   --output-format json \
-  --max-turns 40 \
+  --max-turns 60 \
   "$PROMPT" 2>>"$LOG_FILE")
 STATUS=$?
 
