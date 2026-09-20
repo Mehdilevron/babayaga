@@ -140,6 +140,10 @@ def main() -> int:
         daily_max_loss=float(daily_max_loss) if daily_max_loss else None,
         max_total_loss=float(max_total_loss) if max_total_loss else None,
         equity_floor=float(equity_floor) if equity_floor else None,
+        max_total_profit=(
+            float(os.environ["PROFIT_TARGET"])
+            if os.environ.get("PROFIT_TARGET") else None
+        ),
         loss_anchor_equity=anchor,
         on_halt=_write_halt_lock,
     )

@@ -178,6 +178,7 @@ class ExnessMT5Broker(Broker):
         daily_max_loss: float | None = None,  # stop opening trades after this loss
         max_total_loss: float | None = None,  # LATCHING: hard stop for the account
         equity_floor: float | None = None,    # LATCHING: hard stop at this equity
+        max_total_profit: float | None = None,  # LATCHING: bank the win and stop
         loss_anchor_equity: float | None = None,  # measure max_total_loss from here
         reconcile_interval: float = 10.0,     # seconds between position syncs
         on_halt=None,                          # callback(reason:str) when hard-stopped
@@ -192,6 +193,7 @@ class ExnessMT5Broker(Broker):
         self.daily_max_loss = daily_max_loss
         self.max_total_loss = max_total_loss
         self.equity_floor = equity_floor
+        self.max_total_profit = max_total_profit
         self.reconcile_interval = reconcile_interval
         self.on_halt = on_halt
 
@@ -219,6 +221,7 @@ class ExnessMT5Broker(Broker):
         # fresh loss budget (lose $150, crash, lose $200 more...).
         self.halted_total = False
         self._warned_total = False
+        self.halt_reason: str | None = None
         self._start_equity = (
             loss_anchor_equity if loss_anchor_equity is not None else self._equity
         )
@@ -227,6 +230,7 @@ class ExnessMT5Broker(Broker):
     def force_halt(self, reason: str = "manual") -> None:
         """Latch the hard stop on (e.g. a persisted lock file was found)."""
         self.halted_total = True
+        self.halt_reason = self.halt_reason or reason
 
     def _check_total_loss(self) -> None:
         if self.halted_total:
@@ -239,9 +243,16 @@ class ExnessMT5Broker(Broker):
         if reason is None and self.equity_floor is not None:
             if self._equity <= self.equity_floor:
                 reason = f"equity {self._equity:.2f} <= floor {self.equity_floor:.2f}"
+        # Profit-lock: bank the win and stop, symmetric with the loss stop.
+        if reason is None and self.max_total_profit is not None:
+            gain = self._equity - self._start_equity
+            if gain >= self.max_total_profit:
+                reason = (f"profit target {gain:.2f} >= {self.max_total_profit:.2f} "
+                          "— banked, trading stopped")
         if reason is None:
             return
         self.halted_total = True
+        self.halt_reason = reason
         self._flatten_all()
         if self.on_halt:
             try:
@@ -433,10 +444,8 @@ class ExnessMT5Broker(Broker):
         # the process is restarted with the lock cleared (your command to resume).
         if self.halted_total:
             if not self._warned_total:
-                print(
-                    f"[risk] HARD STOP: account down >= {self.max_total_loss}. "
-                    "Positions flattened; trading halted until you restart."
-                )
+                print(f"[risk] TRADING STOPPED: {self.halt_reason or 'hard stop'}. "
+                      "Positions flattened; halted until you restart.")
                 self._warned_total = True
             return None
         # Daily loss kill-switch: once tripped, stop opening/adjusting positions.

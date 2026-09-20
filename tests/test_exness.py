@@ -242,6 +242,29 @@ def test_total_loss_stays_latched_after_recovery():
     assert broker.halted_total is True
 
 
+def test_profit_target_latching_banks_and_blocks():
+    halts = []
+    mt5 = FakeMT5(trade_mode=DEMO, balance=2000.0, equity=2000.0,
+                  positions=[_pos("EURUSD", 0.10, True, 1)])
+    broker = ExnessMT5Broker(mt5, max_total_profit=300.0,
+                             on_halt=lambda r: halts.append(r))
+    # Inside the target, trading is fine.
+    assert broker.submit(Order("EUR/USD", Side.BUY, 100), mark_price=1.10) is not None
+    n_before = len(mt5.sent_requests)
+    # Account climbs +$350 (> $300 target) -> bank the win, flatten, latch.
+    mt5._account.equity = 2350.0
+    assert broker.submit(Order("EUR/USD", Side.BUY, 100), mark_price=1.10) is None
+    assert broker.halted_total is True
+    assert halts and "profit target" in halts[0]
+    flattens = [r for r in mt5.sent_requests[n_before:]
+                if r.get("comment") == "kill-switch flatten"]
+    assert len(flattens) == 1  # the open long was closed
+    # Latched: stays stopped even if the market keeps running.
+    mt5._account.equity = 2500.0
+    assert broker.submit(Order("EUR/USD", Side.BUY, 100), mark_price=1.10) is None
+
+
+
 def test_force_halt_blocks_trading():
     mt5 = FakeMT5(trade_mode=DEMO, balance=2000.0, equity=2000.0)
     broker = ExnessMT5Broker(mt5, max_total_loss=200.0)
