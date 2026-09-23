@@ -78,6 +78,30 @@ def connect(
     return mt5
 
 
+# Common MT5 order-reject codes -> plain meaning, so a live rejection is
+# diagnosable instead of a silent no-op. Numbers are the standard MT5 values.
+_RETCODE_MEANINGS = {
+    10004: "requote (price moved) — will retry next bar",
+    10006: "request rejected by broker",
+    10007: "request cancelled by trader",
+    10013: "invalid request",
+    10014: "invalid volume (lot size)",
+    10015: "invalid price",
+    10016: "invalid stops — SL/TP too close to price",
+    10018: "market closed",
+    10019: "not enough money / margin",
+    10020: "prices changed",
+    10021: "no quotes (market off / symbol not streaming)",
+    10024: "too many requests — slow down polling",
+    10025: "no changes in request",
+    10027: "AutoTrading DISABLED — click the 'Algo Trading' button in MT5",
+    10026: "AutoTrading disabled by the server",
+    10030: "unsupported filling mode",
+    10031: "no connection to the trade server",
+    10034: "trade disabled for this symbol",
+}
+
+
 # Timeframe name -> attribute on the mt5 module.
 _TIMEFRAMES = {
     "M1": "TIMEFRAME_M1",
@@ -437,6 +461,35 @@ class ExnessMT5Broker(Broker):
         return ret
 
     # -- orders -----------------------------------------------------------
+    def _respect_min_stops(self, symbol_mt5: str, side: Side, price: float,
+                           sl: float | None, tp: float | None):
+        """Push SL/TP out to at least the broker's minimum stop distance.
+
+        Exness (like all MT5 brokers) rejects an order whose SL/TP sits closer
+        to price than ``trade_stops_level`` points — a frequent silent blocker.
+        Our stops are wide (6xATR) so this rarely bites, but clamping guarantees
+        the order isn't refused for stop distance. Only ever widens the stop.
+        """
+        info = getattr(self.mt5, "symbol_info", lambda *_: None)(symbol_mt5)
+        if info is None:
+            return sl, tp
+        point = float(getattr(info, "point", 0.0) or 0.0)
+        level = float(getattr(info, "trade_stops_level", 0) or 0)
+        min_dist = level * point
+        if min_dist <= 0:
+            return sl, tp
+        if side is Side.BUY:
+            if sl is not None:
+                sl = min(sl, price - min_dist)   # SL below price
+            if tp is not None:
+                tp = max(tp, price + min_dist)   # TP above price
+        else:  # SELL
+            if sl is not None:
+                sl = max(sl, price + min_dist)
+            if tp is not None:
+                tp = min(tp, price - min_dist)
+        return sl, tp
+
     def submit(self, order: Order, mark_price: float) -> Fill | None:
         if order.size <= 0 or order.side is Side.FLAT:
             return None
@@ -487,15 +540,26 @@ class ExnessMT5Broker(Broker):
             "type_time": getattr(self.mt5, "ORDER_TIME_GTC", 0),
             "type_filling": self._filling_mode(sym),
         }
-        if order.stop_loss is not None:
-            request["sl"] = float(order.stop_loss)
-        if order.take_profit is not None:
-            request["tp"] = float(order.take_profit)
+        # Respect the broker's minimum stop distance so Exness doesn't reject
+        # the order with "Invalid stops" (a common silent blocker).
+        sl, tp = self._respect_min_stops(sym, order.side, mark_price,
+                                         order.stop_loss, order.take_profit)
+        if sl is not None:
+            request["sl"] = float(sl)
+        if tp is not None:
+            request["tp"] = float(tp)
 
         result = self.mt5.order_send(request)
         done = getattr(self.mt5, "TRADE_RETCODE_DONE", 10009)
         if result is None or getattr(result, "retcode", None) != done:
-            # Rejected / requote / not filled — surface nothing, let OS continue.
+            # Say WHY — a silently-swallowed rejection is how a live bot looks
+            # "stuck". Print the broker's reason so it can be diagnosed/fixed.
+            rc = getattr(result, "retcode", None)
+            why = _RETCODE_MEANINGS.get(rc, f"retcode {rc}")
+            comment = getattr(result, "comment", "") if result is not None else "no result"
+            print(f"[order] {order.symbol} {order.side.value} {lots} lots "
+                  f"REJECTED by broker: {why}"
+                  + (f" — {comment}" if comment else ""))
             return None
 
         fill_price = float(getattr(result, "price", mark_price) or mark_price)

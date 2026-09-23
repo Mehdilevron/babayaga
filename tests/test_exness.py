@@ -265,6 +265,33 @@ def test_profit_target_latching_banks_and_blocks():
 
 
 
+def test_broker_rejection_prints_reason(capsys):
+    # A broker rejection must be surfaced with its reason, not silently swallowed.
+    mt5 = FakeMT5(trade_mode=DEMO, balance=2000.0, equity=2000.0,
+                  order_retcode=10016)  # invalid stops
+    broker = ExnessMT5Broker(mt5)
+    fill = broker.submit(Order("EUR/USD", Side.BUY, 100_000, stop_loss=1.0990),
+                         mark_price=1.10)
+    assert fill is None
+    out = capsys.readouterr().out
+    assert "REJECTED" in out and "invalid stops" in out.lower()
+
+
+def test_min_stop_distance_clamps_sl(monkeypatch):
+    # If the broker requires a minimum stop distance, SL is pushed out so the
+    # order isn't rejected for "invalid stops".
+    mt5 = FakeMT5(trade_mode=DEMO, balance=2000.0, equity=2000.0)
+    broker = ExnessMT5Broker(mt5)
+    info = types.SimpleNamespace(volume_min=0.01, volume_max=100.0, volume_step=0.01,
+                                 trade_contract_size=100000.0, point=0.0001,
+                                 trade_stops_level=100)  # 100 pts * 0.0001 = 0.0010
+    monkeypatch.setattr(mt5, "symbol_info", lambda s: info)
+    broker.submit(Order("EUR/USD", Side.BUY, 100_000, stop_loss=1.0995),  # 5 pips
+                  mark_price=1.1000)
+    req = mt5.sent_requests[-1]
+    assert req["sl"] <= 1.0990 + 1e-9  # widened to at least 10 pips
+
+
 def test_realized_pnl_tracks_account_balance_change():
     # Session realized P&L must reflect the server's balance change, not stay $0.
     mt5 = FakeMT5(trade_mode=DEMO, balance=2000.0, equity=2000.0)
