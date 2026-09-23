@@ -198,7 +198,6 @@ class ExnessMT5Broker(Broker):
         self.on_halt = on_halt
 
         self.positions: dict[str, Position] = {}
-        self.realized_pnl = 0.0
         self.closed_trade_pnls: list[float] = []
         self._cash = 0.0
         self._equity = 0.0
@@ -206,6 +205,10 @@ class ExnessMT5Broker(Broker):
         self.is_live = self._detect_live()
         self.blocked = self.is_live and not self.confirm_live
         self.refresh_account()
+        # Session realized P&L is the authoritative account balance change (the
+        # server books realised trade P&L, swaps and commissions into balance),
+        # measured from this session's opening balance.
+        self._start_cash = self._cash
 
         # Daily loss kill-switch state (auto-resets at day rollover).
         self.halted_daily = False
@@ -322,6 +325,12 @@ class ExnessMT5Broker(Broker):
     @property
     def cash(self) -> float:
         return self._cash
+
+    @property
+    def realized_pnl(self) -> float:
+        """Session realized P&L = account balance change since this session
+        opened (the server books realised P&L into balance)."""
+        return self._cash - self._start_cash
 
     @property
     def unrealized_pnl(self) -> float:

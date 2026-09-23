@@ -265,6 +265,19 @@ def test_profit_target_latching_banks_and_blocks():
 
 
 
+def test_realized_pnl_tracks_account_balance_change():
+    # Session realized P&L must reflect the server's balance change, not stay $0.
+    mt5 = FakeMT5(trade_mode=DEMO, balance=2000.0, equity=2000.0)
+    broker = ExnessMT5Broker(mt5)
+    assert broker.realized_pnl == 0.0
+    mt5._account.balance = 2075.0   # a couple of winning trades booked server-side
+    broker.refresh_account()
+    assert round(broker.realized_pnl, 2) == 75.0
+    mt5._account.balance = 1990.0   # then a loser
+    broker.refresh_account()
+    assert round(broker.realized_pnl, 2) == -10.0
+
+
 def test_force_halt_blocks_trading():
     mt5 = FakeMT5(trade_mode=DEMO, balance=2000.0, equity=2000.0)
     broker = ExnessMT5Broker(mt5, max_total_loss=200.0)

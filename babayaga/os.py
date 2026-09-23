@@ -146,7 +146,18 @@ class TradingOS:
         for fill in fills:
             await self.bus.publish(Topic.FILL, fill)
 
-        # Snapshot the account after any trading.
+        # Snapshot the account after any trading. "halted" must reflect EVERY
+        # way trading can freeze, across both brokers: the risk drawdown
+        # breaker, the paper broker's latch (halted_hard) and the live Exness
+        # broker's latches (halted_total / halted_daily). Missing one would let
+        # the dashboard show "live" while the bot has actually stopped.
+        b = self.broker
+        halted = (
+            self.risk.halted
+            or getattr(b, "halted_hard", False)
+            or getattr(b, "halted_total", False)
+            or getattr(b, "halted_daily", False)
+        )
         self.equity_curve.append(self.broker.equity)
         await self.bus.publish(
             Topic.ACCOUNT,
@@ -156,7 +167,7 @@ class TradingOS:
                 unrealized_pnl=self.broker.unrealized_pnl,
                 realized_pnl=self.broker.realized_pnl,
                 open_positions=self.broker.open_position_count(),
-                halted=self.risk.halted or getattr(self.broker, "halted_hard", False),
+                halted=halted,
                 halt_reason=getattr(self.broker, "halt_reason", None),
             ),
         )

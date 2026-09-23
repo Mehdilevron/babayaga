@@ -277,7 +277,7 @@ es.onmessage = e => {
     $('open').textContent=data.open_positions;
     const r=(data.equity-start)/start*100;
     $('ret').textContent=fmt(r)+'%'; $('ret').className='v '+(r>=0?'pos':'neg');
-    const banked = data.halted && data.halt_reason === 'profit_target';
+    const banked = data.halted && typeof data.halt_reason === 'string' && data.halt_reason.indexOf('profit') === 0;
     $('banked').style.display = banked ? 'inline' : 'none';
     $('halt').style.display = (data.halted && !banked) ? 'inline' : 'none';
     drawChart();
