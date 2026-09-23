@@ -183,3 +183,24 @@ switch, the per-pair supervisor's pause/resume thresholds, wallet key
 validation, config load/validation precedence, the factory's venue-wiring and
 fail-fast checks, and the engine's scan/detect/execute loop including both
 leg-failure paths.
+
+## Memecoin scanner (`babayaga-memescan`)
+
+A separate watchlist tool, independent of the arbitrage engine. Every minute it pulls
+the newest and most-promoted tokens on Solana, Base, and BNB Chain from DexScreener's
+free public API, drops common rug shapes (thin liquidity, brand-new launches, FDV far
+above liquidity, heavy selling), and ranks what's left 0-100 by liquidity depth,
+volume turnover, volume acceleration, and buy pressure. It never trades.
+
+```bash
+babayaga-memescan --once            # one scan, print the top 10
+babayaga-memescan                   # keep scanning every 60s (Ctrl-C to stop)
+babayaga-memescan --chains solana --min-liquidity 50000 --alert-score 70
+```
+
+Set `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` in `.env` to have tokens scoring at or
+above `--alert-score` sent to Telegram, with no repeat alert for the same token for
+`--cooldown-min` minutes.
+
+The score measures current activity, not future price. Most memecoins that look strong
+on these numbers still go to zero, so check the contract and holders before trading any.

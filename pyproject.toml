@@ -19,6 +19,7 @@ dev = ["pytest>=8.0", "pytest-asyncio>=0.23"]
 
 [project.scripts]
 babayaga = "babayaga.cli:main"
+babayaga-memescan = "babayaga.memescan.cli:main"
 
 [build-system]
 requires = ["setuptools>=68", "wheel"]
