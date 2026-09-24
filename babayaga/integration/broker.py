@@ -1,0 +1,283 @@
+"""Broker adapters — the "execution" side of the integration layer.
+
+``PaperBroker`` is a fully functional in-memory broker that maintains positions,
+cash, realised and unrealised P&L, applies configurable spread and commission,
+and honours stop-loss / take-profit levels. ``OandaBroker`` is a documented stub
+that shows where a real venue plugs in — it deliberately refuses to trade.
+"""
+
+from __future__ import annotations
+
+from abc import ABC, abstractmethod
+from dataclasses import dataclass
+
+from babayaga.kernel.events import Fill, Order, Side
+
+
+@dataclass
+class Position:
+    symbol: str
+    size: float = 0.0            # signed: >0 long, <0 short
+    avg_price: float = 0.0
+    stop_loss: float | None = None
+    take_profit: float | None = None
+    trail_activate: float | None = None   # profit distance to arm breakeven
+    trail_distance: float | None = None   # trail this far behind the peak
+    _armed: bool = False                  # has the breakeven jump happened yet
+    _peak: float | None = None            # best price seen since entry
+
+    @property
+    def side(self) -> Side:
+        if self.size > 0:
+            return Side.BUY
+        if self.size < 0:
+            return Side.SELL
+        return Side.FLAT
+
+    def unrealized(self, mark: float) -> float:
+        return (mark - self.avg_price) * self.size
+
+
+class Broker(ABC):
+    @abstractmethod
+    def submit(self, order: Order, mark_price: float) -> Fill | None: ...
+
+    @abstractmethod
+    def mark_to_market(self, symbol: str, price: float) -> None: ...
+
+    @property
+    @abstractmethod
+    def equity(self) -> float: ...
+
+    def pop_protective_fills(self) -> list[Fill]:
+        """Fills produced broker-side (stop-loss/take-profit) since last call.
+
+        Protective exits happen inside mark_to_market, outside the normal
+        order flow — without this hook they would be invisible to the event
+        bus, memory journal and dashboard.
+        """
+        return []
+
+
+class PaperBroker(Broker):
+    def __init__(
+        self,
+        starting_cash: float = 100_000.0,
+        spread: float | None = None,  # price units; None = realistic per-symbol spread
+        commission_per_unit: float = 0.0,
+        slippage: float = 0.0,        # extra price units lost against the taker per fill
+        equity_floor: float | None = None,  # LATCHING hard stop at this equity
+        profit_ceiling: float | None = None,  # LATCHING profit-lock at this equity
+    ) -> None:
+        self.starting_cash = starting_cash
+        self.cash = starting_cash
+        self.spread = spread
+        self.commission_per_unit = commission_per_unit
+        self.slippage = slippage
+        self.equity_floor = equity_floor
+        self.profit_ceiling = profit_ceiling
+        self.halted_hard = False
+        self.halt_reason: str | None = None
+        self.positions: dict[str, Position] = {}
+        self.realized_pnl = 0.0
+        self._marks: dict[str, float] = {}
+        self.closed_trade_pnls: list[float] = []
+        self._protective_fills: list[Fill] = []
+
+    # -- pricing ----------------------------------------------------------
+    def _spread_for(self, symbol: str) -> float:
+        """A scalar spread if configured, else a realistic per-symbol spread.
+
+        The per-symbol default matters for multi-pair runs: USD/JPY quotes near
+        150.0 and XAU/USD near 2000.0, so charging them EUR/USD's 0.0001 would
+        make trading them essentially free — flattering every backtest.
+        """
+        if self.spread is not None:
+            return self.spread
+        from babayaga.integration.market_data import typical_spread
+
+        return typical_spread(symbol)
+
+    def _fill_price(self, symbol: str, side: Side, mark: float) -> float:
+        """Apply half-spread plus fixed slippage against the taker."""
+        half = self._spread_for(symbol) / 2.0 + self.slippage
+        if side is Side.BUY:
+            return mark + half
+        if side is Side.SELL:
+            return mark - half
+        return mark
+
+    def _update_trailing(self, symbol: str, price: float) -> None:
+        """Ratchet the stop toward profit: jump to breakeven once far enough in
+        profit, then trail behind the peak. The stop NEVER moves against the
+        position, so this can only reduce risk / lock gains — never widen a loss.
+        """
+        pos = self.positions.get(symbol)
+        if not pos or pos.size == 0 or pos.trail_distance is None:
+            return
+        long = pos.size > 0
+        pos._peak = price if pos._peak is None else (
+            max(pos._peak, price) if long else min(pos._peak, price)
+        )
+        profit = (pos._peak - pos.avg_price) if long else (pos.avg_price - pos._peak)
+        if not pos._armed and pos.trail_activate is not None and profit >= pos.trail_activate:
+            pos._armed = True
+            be = pos.avg_price
+            pos.stop_loss = be if pos.stop_loss is None else (
+                max(pos.stop_loss, be) if long else min(pos.stop_loss, be)
+            )
+        if pos._armed:
+            trailed = pos._peak - pos.trail_distance if long else pos._peak + pos.trail_distance
+            pos.stop_loss = trailed if pos.stop_loss is None else (
+                max(pos.stop_loss, trailed) if long else min(pos.stop_loss, trailed)
+            )
+
+    def mark_to_market(self, symbol: str, price: float) -> None:
+        self._marks[symbol] = price
+        self._update_trailing(symbol, price)
+        self._check_protective_exits(symbol, price)
+        self._check_equity_floor()
+        self._check_profit_target()
+
+    def _flatten_and_halt(self, reason: str) -> None:
+        """Close every open position and latch the broker so nothing trades
+        until a restart. Shared by the loss hard-stop and the profit-lock."""
+        for sym, pos in list(self.positions.items()):
+            if pos.size != 0:
+                mark = self._marks.get(sym, pos.avg_price)
+                fill = self.submit(
+                    Order(sym, Side.SELL if pos.size > 0 else Side.BUY,
+                          abs(pos.size), reason=reason),
+                    mark,
+                )
+                if fill:
+                    self._protective_fills.append(fill)
+        self.halted_hard = True
+        self.halt_reason = reason
+
+    def _check_equity_floor(self) -> None:
+        """LATCHING hard stop: at the floor, flatten everything and refuse all
+        further orders ("stop and don't trade until my command")."""
+        if self.equity_floor is None or self.halted_hard:
+            return
+        if self.equity <= self.equity_floor:
+            self._flatten_and_halt("hard_stop")
+
+    def _check_profit_target(self) -> None:
+        """LATCHING profit-lock: once equity reaches the ceiling, bank the win —
+        flatten everything and stop trading until a restart. The mirror of the
+        hard stop, for gains instead of losses."""
+        if self.profit_ceiling is None or self.halted_hard:
+            return
+        if self.equity >= self.profit_ceiling:
+            self._flatten_and_halt("profit_target")
+
+    # -- protective exits -------------------------------------------------
+    def _check_protective_exits(self, symbol: str, price: float) -> None:
+        pos = self.positions.get(symbol)
+        if not pos or pos.size == 0:
+            return
+        hit_stop = pos.stop_loss is not None and (
+            (pos.size > 0 and price <= pos.stop_loss)
+            or (pos.size < 0 and price >= pos.stop_loss)
+        )
+        hit_tp = pos.take_profit is not None and (
+            (pos.size > 0 and price >= pos.take_profit)
+            or (pos.size < 0 and price <= pos.take_profit)
+        )
+        if hit_stop or hit_tp:
+            reason = "stop_loss" if hit_stop else "take_profit"
+            fill = self.submit(
+                Order(symbol, Side.SELL if pos.size > 0 else Side.BUY, abs(pos.size), reason=reason),
+                price,
+            )
+            if fill:
+                self._protective_fills.append(fill)
+
+    def pop_protective_fills(self) -> list[Fill]:
+        fills, self._protective_fills = self._protective_fills, []
+        return fills
+
+    # -- order handling ---------------------------------------------------
+    def submit(self, order: Order, mark_price: float) -> Fill | None:
+        if self.halted_hard:
+            return None  # hard stop latched: nothing trades until a restart
+        if order.size <= 0 or order.side is Side.FLAT:
+            return None
+        fill_price = self._fill_price(order.symbol, order.side, mark_price)
+        signed = order.size * order.side.sign
+        pos = self.positions.setdefault(order.symbol, Position(order.symbol))
+
+        prev_size = pos.size
+        new_size = prev_size + signed
+
+        # Realise P&L on the portion of the position being reduced/closed.
+        if prev_size != 0 and (prev_size > 0) != (signed > 0):
+            closing = min(abs(signed), abs(prev_size))
+            direction = 1 if prev_size > 0 else -1
+            pnl = (fill_price - pos.avg_price) * closing * direction
+            self.realized_pnl += pnl
+            self.cash += pnl
+            self.closed_trade_pnls.append(pnl)
+
+        # Update average price when opening or adding in the same direction.
+        opening = prev_size == 0 and new_size != 0
+        if new_size == 0:
+            pos.avg_price = 0.0
+            pos.stop_loss = None
+            pos.take_profit = None
+            pos.trail_activate = pos.trail_distance = None
+            pos._armed = False
+            pos._peak = None
+        elif prev_size == 0 or (prev_size > 0) == (signed > 0):
+            # Weighted average entry.
+            total_cost = pos.avg_price * abs(prev_size) + fill_price * abs(signed)
+            pos.avg_price = total_cost / abs(new_size)
+        # else: reducing but not flipping — keep avg_price.
+
+        pos.size = new_size
+        # Attach protective levels for freshly opened/added positions.
+        if order.stop_loss is not None:
+            pos.stop_loss = order.stop_loss
+        if order.take_profit is not None:
+            pos.take_profit = order.take_profit
+        # Attach trailing config on a fresh open and reset the ratchet state.
+        if opening:
+            pos.trail_activate = order.trail_activate
+            pos.trail_distance = order.trail_distance
+            pos._armed = False
+            pos._peak = None
+
+        commission = self.commission_per_unit * order.size
+        self.cash -= commission
+
+        self._marks[order.symbol] = mark_price
+        return Fill(
+            symbol=order.symbol,
+            side=order.side,
+            size=order.size,
+            price=fill_price,
+            order_reason=order.reason,
+            timestamp=order.timestamp,
+        )
+
+    # -- account ----------------------------------------------------------
+    @property
+    def unrealized_pnl(self) -> float:
+        total = 0.0
+        for sym, pos in self.positions.items():
+            mark = self._marks.get(sym)
+            if mark is not None:
+                total += pos.unrealized(mark)
+        return total
+
+    @property
+    def equity(self) -> float:
+        return self.cash + self.unrealized_pnl
+
+    def open_position_count(self) -> int:
+        return sum(1 for p in self.positions.values() if p.size != 0)
+
+
+# A real OANDA broker lives in ``babayaga.integration.oanda`` (imported lazily to
+# avoid a circular import, since that module imports from this one).

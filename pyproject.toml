@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "babayaga-os"
+version = "0.1.0"
+description = "BabaYaga OS — an AI operating system for algorithmic forex trading (paper only)"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Mehdilevron" }]
+keywords = ["forex", "trading", "agents", "multi-agent", "backtesting", "quant"]
+dependencies = []  # runs on the Python standard library alone
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0"]
+
+[project.scripts]
+babayaga = "babayaga.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["babayaga*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

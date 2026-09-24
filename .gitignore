@@ -1,0 +1,15 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.venv/
+venv/
+*.sqlite
+*.sqlite3
+*.db
+babayaga-memory*.sqlite
+.DS_Store
