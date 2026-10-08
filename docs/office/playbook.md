@@ -10,13 +10,21 @@ will not quote prices, hours or locations that are still `TODO`; it writes
 |---|---|
 | Business | 1:1 fitness coaching |
 | Instagram | @mehdi_babayaga |
-| City / timezone | Dubai (Asia/Dubai) — TODO confirm |
-| Coaching formats | TODO e.g. in-person 1:1, online coaching, small group |
-| Prices | TODO e.g. single session, 10-pack, monthly online |
-| Hours | TODO e.g. Sun–Thu 6:00–21:00 |
-| Location | TODO gym / home visits / online only |
+| City / timezone | UAE, online (Asia/Dubai) |
+| Coaching formats | Online coaching only, clients anywhere in the UAE |
+| Prices | AED 2,000 per month |
+| What's included | Personalised workout plan, food / diet plan, nutrition guidance, WhatsApp support |
+| WhatsApp support promise | TODO owner decides wording — see note below |
+| Hours (for free consults) | TODO e.g. Sun–Thu 18:00–21:00 |
+| Location | Online — no gym or home visits |
 | Booking link | TODO free Google Calendar booking page or Calendly free link |
 | Languages | TODO e.g. English, French, Arabic |
+
+### Note on "24/7 WhatsApp"
+Until the owner confirms the wording, the agent describes support as
+"direct WhatsApp access to your coach" and never promises "24/7" or an
+instant reply time. The agent cannot read or answer WhatsApp — every
+WhatsApp message is handled by the owner personally.
 
 ## Free tools (no spend)
 
@@ -53,6 +61,14 @@ Each run:
 
 ### Safe to auto-answer (once enabled)
 Prices, hours, location, formats, "how do I book", "is the first session free".
+
+### Standard answers
+
+**Price question:**
+> Online coaching is AED 2,000/month and includes everything: your personal workout plan, a food and nutrition plan built around what you actually eat, and direct WhatsApp access to me for questions and check-ins. The first step is a free consult so we can see if it's the right fit 🙌
+
+**"Is it in person?":**
+> It's fully online, so it works wherever you are in the UAE and around your schedule — plans in your phone, check-ins and support on WhatsApp.
 
 ### Reply scripts
 
