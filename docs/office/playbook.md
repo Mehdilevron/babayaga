@@ -15,10 +15,10 @@ will not quote prices, hours or locations that are still `TODO`; it writes
 | Prices | AED 2,000 per month |
 | What's included | Personalised workout plan, food / diet plan, nutrition guidance, WhatsApp support |
 | WhatsApp support promise | TODO owner decides wording — see note below |
-| Hours (for free consults) | TODO e.g. Sun–Thu 18:00–21:00 |
+| Hours (for free consults) | 11:00–12:00 (Asia/Dubai), 20-min slots — days TODO, assume every day until confirmed |
 | Location | Online — no gym or home visits |
 | Booking link | TODO free Google Calendar booking page or Calendly free link |
-| Languages | TODO e.g. English, French, Arabic |
+| Languages | English only (if someone writes in another language, reply politely in English) |
 
 ### Note on "24/7 WhatsApp"
 Until the owner confirms the wording, the agent describes support as
