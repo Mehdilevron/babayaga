@@ -136,3 +136,24 @@ Short, in this order:
 3. Appointments today/tomorrow and reminders drafted
 4. Content waiting for approval
 5. One suggestion for the week
+
+## 5. Referrals & testimonials
+
+The owner sends these personally (WhatsApp). The agent drafts personalised
+versions in its report when a client hits 4 weeks, a milestone, or says
+something positive.
+
+**Testimonial request (after 3–4 good weeks):**
+> Hey {name}! Really proud of how you're doing — {specific win, e.g. "down 4kg and hitting every session"} 💪 Would you be up for sharing 2–3 lines about your experience so far? Something like what made you start, and what's changed. A short voice note works too. No pressure at all!
+
+**Before/after permission (only if they share photos):**
+> Your progress pics are amazing 🔥 Would you be okay with me sharing them on my Instagram? I can blur your face or keep it anonymous — totally your call.
+
+**Referral ask (right after a win or a thank-you):**
+> So glad it's working for you 🙌 Quick one — do you know anyone who keeps saying they want to get in shape but never starts? I'm taking a few more online clients this month. If you send them my way they get a free consult, and I'll give you {referral reward, TODO e.g. a free week} as a thank-you.
+
+**Message the client can forward to a friend:**
+> I've been doing online coaching with Mehdi (@mehdi_babayaga) — workout plan, food plan and WhatsApp support, all online. Honestly the easiest it's been to stay consistent. He does a free 20-min consult if you want to see if it fits: {booking link}
+
+**Past client / old lead check-in:**
+> Hey {name}, hope you're doing well! I'm opening a few online coaching spots this month and thought of you. Still keen to work on {goal}? Happy to jump on a free 20-min call to plan it out.
