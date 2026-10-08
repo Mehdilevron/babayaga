@@ -15,7 +15,7 @@ will not quote prices, hours or locations that are still `TODO`; it writes
 | Prices | AED 2,000 per month |
 | What's included | Personalised workout plan, food / diet plan, nutrition guidance, WhatsApp support |
 | WhatsApp support promise | TODO owner decides wording — see note below |
-| Hours (for free consults) | 11:00–12:00 (Asia/Dubai), 20-min slots — days TODO, assume every day until confirmed |
+| Hours (for free consults) | Every day, 11:00–12:00 (Asia/Dubai), 20-min slots (max 3 consults/day) |
 | Location | Online — no gym or home visits |
 | Booking link | TODO free Google Calendar booking page or Calendly free link |
 | Languages | English only (if someone writes in another language, reply politely in English) |
