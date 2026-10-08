@@ -139,6 +139,11 @@ Short, in this order:
 
 ## 5. Referrals & testimonials
 
+**Referral reward:** one free week added to the referring client's plan for
+each referred friend who becomes a paying client (not just for booking a
+consult). Log the referrer in the new client's Leads row (Source `Referral`,
+Notes "referred by {name}") so the owner remembers to apply it.
+
 The owner sends these personally (WhatsApp). The agent drafts personalised
 versions in its report when a client hits 4 weeks, a milestone, or says
 something positive.
@@ -150,7 +155,7 @@ something positive.
 > Your progress pics are amazing 🔥 Would you be okay with me sharing them on my Instagram? I can blur your face or keep it anonymous — totally your call.
 
 **Referral ask (right after a win or a thank-you):**
-> So glad it's working for you 🙌 Quick one — do you know anyone who keeps saying they want to get in shape but never starts? I'm taking a few more online clients this month. If you send them my way they get a free consult, and I'll give you {referral reward, TODO e.g. a free week} as a thank-you.
+> So glad it's working for you 🙌 Quick one — do you know anyone who keeps saying they want to get in shape but never starts? I'm taking a few more online clients this month. If you send them my way they get a free consult, and I'll add a free week to your coaching as a thank-you.
 
 **Message the client can forward to a friend:**
 > I've been doing online coaching with Mehdi (@mehdi_babayaga) — workout plan, food plan and WhatsApp support, all online. Honestly the easiest it's been to stay consistent. He does a free 20-min consult if you want to see if it fits: {booking link}
