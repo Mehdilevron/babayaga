@@ -61,3 +61,5 @@ As one account split over the five (no leverage):
     python3 run.py        # intraday table
     python3 run2.py       # engine check, filters, gold only, RSI(2) per market
     python3 portfolio.py  # RSI(2) as one account
+    python3 gold_long.py  # gold on 2 years of Dukascopy 1-minute data
+                          # (needs datafeed.dukascopy.com in Allowed domains)
