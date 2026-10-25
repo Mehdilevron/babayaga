@@ -20,6 +20,7 @@ that touches both stop and target as a loss, and closes after 10 days.
 import argparse
 import datetime
 import json
+import re
 import sys
 import time
 import urllib.request
@@ -43,14 +44,42 @@ FX = [  # name, Yahoo symbol, decimals, tradable
     ("Gold", "GC=F", 2, True),
     ("Dollar index", "DX-Y.NYB", 3, False),
 ]
-FLAGS = {"USD": "🇺🇸", "EUR": "🇪🇺", "GBP": "🇬🇧", "JPY": "🇯🇵",
-         "AUD": "🇦🇺", "CAD": "🇨🇦", "CHF": "🇨🇭", "NZD": "🇳🇿"}
+FLAGS = {"USD": "🇺🇸", "EUR": "🇪🇺", "GBP": "🇬🇧", "JPY": "🇯🇵", "AUD": "🇦🇺",
+         "CAD": "🇨🇦", "CHF": "🇨🇭", "NZD": "🇳🇿", "CNY": "🇨🇳"}
+COUNTRIES = {"US": ("USD", "🇺🇸"), "EU": ("EUR", "🇪🇺"), "DE": ("EUR", "🇩🇪"),
+             "GB": ("GBP", "🇬🇧"), "UK": ("GBP", "🇬🇧"), "JP": ("JPY", "🇯🇵"),
+             "AU": ("AUD", "🇦🇺"), "CA": ("CAD", "🇨🇦"), "CH": ("CHF", "🇨🇭"),
+             "NZ": ("NZD", "🇳🇿"), "CN": ("CNY", "🇨🇳")}
+# Yahoo's own "high importance" flag misses some market movers (AU CPI) and
+# keeps some that are not (mortgage rates), so pick the movers by name.
+HIGH_IMPACT = re.compile(
+    r"\b(CPI|PPI|PCE|GDP|Payrolls|Unemployment Rate|Employment Change|Retail Sales|"
+    r"Jobless|Producer Prices?|Rate Decision|Funds Tgt Rate|Refinancing Rate|Bank Rate|"
+    r"Cash Rate|Policy Rate|Interest Rate|ISM Manufacturing PMI|ISM N-Mfg PMI|"
+    r"Avg(?:erage)? (?:Hourly )?Earnings)\b", re.I)
+NOT_IMPACT = re.compile(r"Dallas|Richmond|Rich Fed|Philly|Empire|Mortgage|Redbook|"
+                        r"CPI Index|Weightd|Employment Idx", re.I)
+PRIORITY = [re.compile(p, re.I) for p in (  # most market-moving first
+    r"rate decision|Funds Tgt|Refinancing Rate|Bank Rate|Cash Rate|Policy Rate|Interest Rate",
+    r"Core (CPI|PCE)", r"CPI|PCE", r"Payrolls", r"GDP", r"PPI|Producer Price",
+    r"Retail Sales", r"Unemployment|Employment Change", r"Earnings", r"ISM",
+    r"Initial jobless", r"Jobless")]
+RENAME = {"Fed Funds Tgt Rate": "Fed interest rate decision",
+          "ECB Refinancing Rate": "ECB interest rate decision",
+          "BOE Bank Rate": "Bank of England rate decision",
+          "BoC Rate Decision": "Bank of Canada rate decision",
+          "Initial Jobless Clm": "Initial jobless claims",
+          "Non-Farm Payrolls": "Non-Farm Payrolls (NFP)"}
 SETUP_NAMES = {"breakout_20d": "20-day breakout", "bull_flag": "Bull flag",
                "reclaim_ma20": "Back above 20-day avg", "oversold": "Oversold",
                "oversold_bounce": "Oversold bounce"}
 SHORT_NAMES = {"breakout_20d": "Breakout", "bull_flag": "Flag", "reclaim_ma20": "Above avg",
                "oversold": "Oversold", "oversold_bounce": "Bounce"}
 CALENDAR_URL = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
+YAHOO_CALENDAR_URL = ("https://query1.finance.yahoo.com/ws/screeners/v1/finance/calendar-events"
+                      "?countPerDay=99&economicEventsHighImportanceOnly=%s"
+                      "&economicEventsRegionFilter=&startDate=%d&endDate=%d"
+                      "&modules=economicEvents&lang=en-US&region=US")
 ICON = {"BUY": "🟢", "SELL": "🔴", None: "🟡"}
 
 try:
@@ -220,32 +249,110 @@ def strong(x):
 
 # ---------------------------------------------------------------- calendar
 
-def calendar(now_utc):
-    events = get_json(CALENDAR_URL)
-    high, medium = [], []
-    for ev in events:
-        if ev.get("country") not in FLAGS or ev.get("impact") not in ("High", "Medium"):
+# An event is (time UTC, currency, flag, title, forecast, previous).
+
+def clean(title):
+    title = " ".join((title or "").replace("*", " ").split())
+    return RENAME.get(title, title)
+
+
+def ff_events():
+    """Forex Factory's high-impact events this week (they carry forecasts)."""
+    out = []
+    for ev in get_json(CALENDAR_URL):
+        ccy = ev.get("country", "")
+        if ev.get("impact") != "High" or ccy not in FLAGS:
             continue
         try:
-            t = datetime.datetime.fromisoformat(ev["date"])
+            t = datetime.datetime.fromisoformat(ev["date"]).astimezone(datetime.timezone.utc)
         except (KeyError, ValueError):
             continue
-        if not (now_utc <= t.astimezone(datetime.timezone.utc) <= now_utc + datetime.timedelta(hours=36)):
+        out.append((t, ccy, FLAGS[ccy], clean(ev.get("title")),
+                    ev.get("forecast") or "", ev.get("previous") or ""))
+    return out
+
+
+def yahoo_events(now_utc):
+    """Yahoo's economic calendar for the next 8 days, kept to the movers."""
+    start = int(now_utc.timestamp()) * 1000
+    end = start + 8 * 86400 * 1000
+    out, seen, errors = [], set(), []
+    for high_only in ("true", "false"):  # both: a busy day can cut the full list off
+        try:
+            res = get_json(YAHOO_CALENDAR_URL % (high_only, start, end))["finance"]["result"]
+        except Exception as e:
+            errors.append(type(e).__name__)
             continue
-        (high if ev["impact"] == "High" else medium).append((t.astimezone(NY), ev))
-    return sorted(high, key=lambda x: x[0]), sorted(medium, key=lambda x: x[0])
+        for day in (res or {}).get("economicEvents", []):
+            for r in day.get("records", []):
+                cc, raw = r.get("countryCode"), r.get("event") or ""
+                if cc not in COUNTRIES or not HIGH_IMPACT.search(raw) or NOT_IMPACT.search(raw):
+                    continue
+                key = (cc, raw, r.get("eventTime"))
+                if key in seen or not r.get("eventTime"):
+                    continue
+                seen.add(key)
+                t = datetime.datetime.fromtimestamp(r["eventTime"] / 1000, datetime.timezone.utc)
+                prior = r.get("prior")
+                out.append((t, COUNTRIES[cc][0], COUNTRIES[cc][1], clean(raw), "",
+                            "" if prior in (None, "") else str(prior)))
+    if len(errors) == 2:
+        raise RuntimeError("/".join(errors))
+    return out
 
 
-def event_lines(rows):
-    out = []
-    for t, ev in rows:
-        out.append("%s %s %s" % (t.strftime("%a %H:%M"), FLAGS[ev["country"]], ev.get("title", "")))
-        extra = []
-        if ev.get("forecast"):
-            extra.append("forecast " + ev["forecast"])
-        if ev.get("previous"):
-            extra.append("previous " + ev["previous"])
-        if extra:
+def calendar(now_utc):
+    """(events, source, note). Forex Factory first, Yahoo when it is blocked."""
+    try:
+        return ff_events(), "Forex Factory", ""
+    except Exception as e:
+        ff_error = type(e).__name__
+    try:
+        return (yahoo_events(now_utc), "Yahoo",
+                "Forecasts need Forex Factory: add nfs.faireconomy.media to Allowed domains.")
+    except Exception as e:
+        raise RuntimeError("Forex Factory %s, Yahoo %s" % (ff_error, e))
+
+
+def rank(title):
+    return next((k for k, p in enumerate(PRIORITY) if p.search(title)), len(PRIORITY))
+
+
+def window(events, start, hours):
+    end = start + datetime.timedelta(hours=hours)
+    return [e for e in events if start <= e[0] <= end]
+
+
+def event_lines(events, day_headers=False):
+    groups = {}
+    for t, ccy, flag, title, fc, prev in sorted(events):
+        groups.setdefault((t, ccy, flag), []).append((title, fc, prev))
+    out, last_day = [], None
+    for (t, ccy, flag), items in sorted(groups.items()):
+        local = t.astimezone(NY)
+        if day_headers and local.date() != last_day:
+            out += ["", local.strftime("%a %d %b")]
+            last_day = local.date()
+        titles = []
+        for title, _, _ in sorted(items, key=lambda i: rank(i[0])):
+            if title not in titles:
+                titles.append(title)
+        # one of each kind first (Core PCE, GDP, claims), then the rest
+        shown, kinds = [], set()
+        for title in titles:
+            if rank(title) not in kinds:
+                shown.append(title)
+                kinds.add(rank(title))
+        shown = (shown + [t for t in titles if t not in shown])[:3]
+        rest = len(titles) - len(shown)
+        head = " · ".join(shown) + (" (+%d more)" % rest if rest else "")
+        out.append("%s %s %s %s" % (local.strftime("%H:%M" if day_headers else "%a %H:%M"), flag, ccy, head))
+        if len(items) == 1 and (items[0][1] or items[0][2]):
+            extra = []
+            if items[0][1]:
+                extra.append("forecast " + items[0][1])
+            if items[0][2]:
+                extra.append("previous " + items[0][2])
             out.append("   " + " · ".join(extra))
     return out
 
@@ -354,7 +461,28 @@ def stocks_message(watch, news, note, rows):
     return "\n".join(out)
 
 
-def forex_message(fx, medium):
+def news_warning(label, soon):
+    """First big event in the next 36 hours for the currencies behind label."""
+    ccys = set(label.split("/")) if "/" in label else {"USD"}
+    hits = sorted(e for e in soon if e[1] in ccys)
+    if not hits:
+        return None
+    t, ccy, flag, title = hits[0][:4]
+    return "⚠️ News %s %s %s %s" % (t.astimezone(NY).strftime("%a %H:%M"), flag, ccy, title)
+
+
+def calendar_section(events, cal):
+    source, note, error = cal
+    if error:
+        return ["Calendar not available (%s)." % error]
+    out = event_lines(events, day_headers=True) if events else ["", "No high-impact news."]
+    out += ["", "Source: %s, New York time." % source]
+    if note:
+        out.append(note)
+    return out
+
+
+def forex_message(fx, week, cal):
     out = ["🟢 buy setup · 🔴 sell setup · 🟡 wait"]
     order = sorted(fx, key=lambda r: (r[1] is None, not (r[1] and r[1].get("side")),
                                       -(r[1]["avg_r"] or 0) if r[1] and r[1].get("avg_r") is not None else 0))
@@ -373,12 +501,11 @@ def forex_message(fx, medium):
         elif tradable:
             out.append("   No setup: " + why_not(x))
     out += ["", "Gold = COMEX futures. Spot XAUUSD on TradingView is a little lower."]
-    if medium:
-        out += ["", LINE, "📅 OTHER EVENTS (New York time)"] + event_lines(medium)
+    out += ["", LINE, "📅 HIGH-IMPACT NEWS · next 7 days"] + calendar_section(week, cal)
     return "\n".join(out)
 
 
-def plan_message(data_day, top, high, cal_error):
+def plan_message(data_day, top, soon, cal):
     out = ["Data: %s close" % data_day.strftime("%a %d %b"), LINE, "🎯 TOP SETUPS (best first)"]
     if not top:
         out += ["", "No strong setups today.", "Waiting is also a decision."]
@@ -395,15 +522,16 @@ def plan_message(data_day, top, high, cal_error):
         t = x.get("today")
         if t and ((t[2] >= x["entry"]) if x["side"] == "BUY" else (t[3] <= x["entry"])):
             out.append("   ⚡ Entry already reached (now %s)" % fmt(t[4], dp))
-    out += ["", LINE, "⚠️ BIG NEWS (New York time)"]
-    if cal_error:
-        out += ["Calendar not available (%s)." % cal_error,
-                "Add nfs.faireconomy.media in",
-                "Network access → Allowed domains."]
-    elif high:
-        out += event_lines(high)
+        warn = news_warning(label, soon)
+        if warn:
+            out.append("   " + warn)
+    out += ["", LINE, "⚠️ BIG NEWS · next 36 hours"]
+    if cal[2]:
+        out.append("Calendar not available (%s)." % cal[2])
+    elif soon:
+        out += event_lines(soon) + ["Source: %s, New York time." % cal[0]]
     else:
-        out.append("No big news in the next 36 hours.")
+        out.append("No high-impact news in the next 36 hours.")
     out += ["", LINE, "How to read this:",
             "• No entry price = no trade.",
             "• Set the stop when you enter.",
@@ -491,10 +619,13 @@ def main():
         time.sleep(0.3)
 
     try:
-        high, medium = calendar(now)
-        cal_error = ""
+        events, source, note = calendar(now)
+        cal = (source, note, "")
     except Exception as e:
-        high, medium, cal_error = [], [], type(e).__name__
+        events, cal = [], ("", "", str(e))
+        print("calendar: %s" % e, file=sys.stderr)
+    soon = window(events, now, 36)
+    week = window(events, now, 24 * 7)
 
     top = [(row[0], row[2], x, "") for row, x in fx if row[3] and strong(x)]
     top += [(h["symbol"], 2, x, " (stock)") for h, x in stock_rows if strong(x)]
@@ -509,9 +640,9 @@ def main():
     messages += [(t, m, 3, ["chart_with_upwards_trend"]) for t, m in reversed(split(
         "%s📈 US stocks · %s" % (pre, stamp), stocks_message(watch, news, a.stocks_note, stock_rows)))]
     messages += [(t, m, 3, ["currency_exchange"]) for t, m in reversed(split(
-        "%s💱 Forex & gold · %s" % (pre, stamp), forex_message(fx, medium)))]
+        "%s💱 Forex & gold · %s" % (pre, stamp), forex_message(fx, week, cal)))]
     messages += [(t, m, 4, ["dart"]) for t, m in reversed(split(
-        "%s🎯 Today's plan · %s" % (pre, today), plan_message(data_day, top, high, cal_error)))]
+        "%s🎯 Today's plan · %s" % (pre, today), plan_message(data_day, top, soon, cal)))]
 
     ok = True
     for title, text, prio, tags in messages:

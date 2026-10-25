@@ -75,6 +75,40 @@ class Indicators(unittest.TestCase):
         self.assertEqual(dr.signal(0, [10], [9], [8], [75]), None)
 
 
+class Calendar(unittest.TestCase):
+    T = datetime.datetime(2026, 10, 29, 12, 30, tzinfo=datetime.timezone.utc)
+
+    def test_movers_kept_noise_dropped(self):
+        keep = ["Fed Funds Tgt Rate", "Core PCE Price Index YY*", "Non-Farm Payrolls",
+                "CPI YY *", "PPI QQ", "GDP Flash QQ SA", "BoC Rate Decision"]
+        drop = ["MBA 30-Yr Mortgage Rate", "Dallas Fed PCE*", "ISM Manuf Employment Idx",
+                "CPI Index*", "Consumer Confidence*"]
+        for t in keep:
+            self.assertTrue(dr.HIGH_IMPACT.search(t) and not dr.NOT_IMPACT.search(t), t)
+        for t in drop:
+            self.assertFalse(dr.HIGH_IMPACT.search(t) and not dr.NOT_IMPACT.search(t), t)
+
+    def test_group_lists_biggest_first(self):
+        ev = [(self.T, "USD", "🇺🇸", dr.clean(n), "", "") for n in
+              ("Cont Jobless Clm", "Initial Jobless Clm", "Core PCE Price Index MM *", "GDP Advance")]
+        line = dr.event_lines(ev)[0]
+        self.assertIn("Core PCE Price Index MM · GDP Advance · Initial jobless claims (+1 more)", line)
+
+    def test_single_event_shows_forecast_and_previous(self):
+        ev = [(self.T, "USD", "🇺🇸", "CPI m/m", "0.3%", "0.4%")]
+        self.assertEqual(dr.event_lines(ev)[1], "   forecast 0.3% · previous 0.4%")
+
+    def test_news_warning_matches_pair_currencies(self):
+        ev = [(self.T, "JPY", "🇯🇵", "BOJ rate", "", ""), (self.T, "EUR", "🇪🇺", "ECB rate", "", "")]
+        self.assertIn("EUR ECB rate", dr.news_warning("EUR/USD", ev))
+        self.assertIsNone(dr.news_warning("Gold", ev))  # gold and stocks watch USD
+
+    def test_window(self):
+        ev = [(self.T, "USD", "🇺🇸", "x", "", "")]
+        self.assertEqual(dr.window(ev, self.T - datetime.timedelta(hours=1), 36), ev)
+        self.assertEqual(dr.window(ev, self.T + datetime.timedelta(hours=1), 36), [])
+
+
 class Split(unittest.TestCase):
     def test_short_message_is_one_part(self):
         self.assertEqual(dr.split("T", "hello"), [("T", "hello")])
