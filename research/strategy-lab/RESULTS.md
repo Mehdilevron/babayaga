@@ -56,10 +56,25 @@ As one account split over the five (no leverage):
 | RSI(2) < 5 | 454 | 76% | 2.0% | 11% | 6% |
 | Buy and hold SPY (price only) | - | - | 8.8% | 56% | 100% |
 
+### Trading RSI(2) at the next open instead of the close
+
+Same signals, but buys and sells fill at the next day's open, so the alert
+can come after the US close and be acted on the next morning.
+
+| fund | at the close | at the next open |
+|---|---|---|
+| SPY | 177 trades, 72% won, +0.40% | 177 trades, 70% won, +0.33% |
+| QQQ | 190 trades, 67% won, +0.43% | 190 trades, 66% won, +0.37% |
+| IWM | 162 trades, 69% won, +0.27% | 162 trades, 71% won, +0.38% |
+| DIA | 187 trades, 72% won, +0.24% | 187 trades, 69% won, +0.27% |
+| GLD | 140 trades, 73% won, +0.35% | 140 trades, 66% won, +0.30% |
+| all | 856 trades, 71% won, +0.34% | 856 trades, 68% won, +0.33% |
+
 ## Re-run
 
     python3 run.py        # intraday table
     python3 run2.py       # engine check, filters, gold only, RSI(2) per market
     python3 portfolio.py  # RSI(2) as one account
+    python3 rsi2_open.py  # RSI(2) at the close vs the next open
     python3 gold_long.py  # gold on 2 years of Dukascopy 1-minute data
                           # (needs datafeed.dukascopy.com in Allowed domains)

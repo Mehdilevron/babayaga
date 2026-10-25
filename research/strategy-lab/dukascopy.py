@@ -5,11 +5,13 @@ LZMA-compressed records of (seconds from 00:00 UTC, open, close, low, high, volu
 with prices as integers scaled by the symbol's point. The field order is checked
 on the data itself, so a wrong guess fails loudly instead of corrupting a test.
 """
+import concurrent.futures
 import datetime
 import lzma
 import os
 import pickle
 import struct
+import sys
 import time
 import urllib.error
 import urllib.request
@@ -41,44 +43,42 @@ def decode(raw, day, point):
 def fetch_day(symbol, day):
     url = URL % (symbol, day.year, day.month - 1, day.day)
     req = urllib.request.Request(url, headers={"User-Agent": UA})
-    for attempt in range(4):
+    err = None
+    for attempt in range(7):
         try:
-            with urllib.request.urlopen(req, timeout=60) as r:
+            with urllib.request.urlopen(req, timeout=20) as r:
                 return r.read()
         except urllib.error.HTTPError as e:
             if e.code == 404:
                 return b""  # no file: market closed
             err = e
-        except Exception as e:  # network hiccup: back off and retry
+        except Exception as e:  # connection cut off mid-transfer: back off and retry
             err = e
-        time.sleep(2 ** attempt)
+        time.sleep(min(2 ** attempt, 10))
     raise err
 
 
-def minutes(symbol, start, end):
+def minutes(symbol, start, end, workers=4):
     """All 1-minute candles from start to end (dates), cached per month."""
     os.makedirs(CACHE, exist_ok=True)
     out, day = [], start
+    pool = concurrent.futures.ThreadPoolExecutor(max_workers=workers)
     while day <= end:
         month = day.replace(day=1)
         path = os.path.join(CACHE, "%s_%s.pkl" % (symbol, month.strftime("%Y-%m")))
-        if os.path.exists(path):
-            cached = pickle.load(open(path, "rb"))
-        else:
-            cached = {}
+        cached = pickle.load(open(path, "rb")) if os.path.exists(path) else {}
         nxt = (month + datetime.timedelta(days=32)).replace(day=1)
-        changed = False
-        d = day
-        while d < nxt and d <= end:
-            if d.weekday() != 5 and d.isoformat() not in cached:  # Saturdays have no trading
-                cached[d.isoformat()] = decode(fetch_day(symbol, d), d, POINT[symbol])
-                changed = True
-                time.sleep(0.1)
+        want = [day + datetime.timedelta(days=i) for i in range((min(nxt - datetime.timedelta(days=1), end) - day).days + 1)]
+        missing = [d for d in want if d.weekday() != 5 and d.isoformat() not in cached]  # no Saturday trading
+        for d, raw in zip(missing, pool.map(lambda d: fetch_day(symbol, d), missing)):
+            cached[d.isoformat()] = decode(raw, d, POINT[symbol])
+        for d in want:
             out += cached.get(d.isoformat(), [])
-            d += datetime.timedelta(days=1)
-        if changed and nxt <= datetime.date.today():  # only cache complete months
+        if missing and nxt <= datetime.date.today():  # only cache complete months
             pickle.dump(cached, open(path, "wb"))
+        print("%s %s: %d days" % (symbol, month.strftime("%Y-%m"), len(want)), file=sys.stderr, flush=True)
         day = nxt
+    pool.shutdown()
     return out
 
 
