@@ -75,6 +75,8 @@ def download(symbol, start, end, pause=1.0):
     todo = [d for d in reversed(trading_days(start, end)) if not os.path.exists(day_path(symbol, d))]
     failed = []
     for n, d in enumerate(todo, 1):
+        if os.path.exists(day_path(symbol, d)):
+            continue  # another download already got it
         raw = fetch_day(symbol, d)
         if raw is None:
             failed.append(d)
