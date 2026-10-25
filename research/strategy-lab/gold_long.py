@@ -1,7 +1,7 @@
-"""Gold (spot XAUUSD) on 2 years of Dukascopy 1-minute data, as 5-minute bars:
+"""Gold (spot XAUUSD) on Dukascopy 1-minute data, as 5-minute bars:
 ORB at 8:30 New York, yesterday's high/low, and the coded ICT model.
 
-    python3 gold_long.py [years]   # default 2
+    python3 gold_long.py [years] [--no-download]   # default 2 years
 """
 import datetime
 import os
@@ -33,13 +33,21 @@ VARIANTS = [
 
 
 def main():
-    years = float(sys.argv[1]) if len(sys.argv) > 1 else 2.0
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    years = float(args[0]) if args else 2.0
     end = datetime.date.today() - datetime.timedelta(days=1)
     start = end - datetime.timedelta(days=int(365.25 * years))
-    rows = dukascopy.minutes("XAUUSD", start, end)
+    if "--no-download" not in sys.argv:
+        failed = dukascopy.download("XAUUSD", start, end)
+        if failed:
+            print("retrying %d refused days" % len(failed), file=sys.stderr, flush=True)
+            dukascopy.download("XAUUSD", start, end, pause=3.0)
+    rows, coverage = dukascopy.minutes("XAUUSD", start, end)
     bars = dukascopy.to5m(rows)
-    print("XAUUSD %s to %s: %d one-minute candles -> %d five-minute bars (cost $%.2f a trade)"
-          % (start, end, len(rows), len(bars), COST))
+    print("XAUUSD %s to %s: %d one-minute candles -> %d five-minute bars, %.0f%% of days present"
+          " (cost $%.2f a trade)" % (start, end, len(rows), len(bars), 100 * coverage, COST))
+    if coverage < 0.95:
+        print("WARNING: under 95% of days downloaded; results cover only part of the period")
     print(HEADER)
     for name, fn in VARIANTS:
         print(row(name, stats(fn(bars))))
