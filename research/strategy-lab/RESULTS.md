@@ -27,6 +27,29 @@ Gold alone: ORB 8:30 (1R) +0.04R and the ICT model (2R) +0.13R, on only 47 and
 37 trades. That is within luck (one standard error is about 0.2R), so neither
 is proven.
 
+## Gold only, Dukascopy 1-minute data, Feb 2025 - Oct 2026
+
+The free feed throttled the download, so the data has a hole from November
+2025 to February 2026: 425 days, 79% of the period, about 16 months. Spot gold,
+$0.30 cost a trade.
+
+| strategy | trades | win | avg | max drawdown |
+|---|---|---|---|---|
+| ORB 8:30 ET, 15 min range, 1R | 346 | 49% | -0.05R | 32R |
+| ORB 8:30 ET, 30 min range, 1R | 344 | 51% | +0.01R | 14R |
+| ORB 8:30 ET, 30 min range, 2R | 344 | 44% | +0.01R | 21R |
+| Yesterday's high/low sweep fade, 1R | 190 | 44% | -0.21R | 48R |
+| Yesterday's high/low breakout, 2R | 231 | 45% | -0.04R | 13R |
+| ICT 4-step model, 1R | 268 | 48% | -0.07R | 31R |
+| ICT 4-step model, 2R | 268 | 37% | -0.04R | 31R |
+| ICT 4-step model, 3R | 268 | 30% | -0.12R | 48R |
+| ICT model, target = opposite liquidity | 263 | 27% | -0.15R | 59R |
+| ICT model + 1h trend filter, 2R | 139 | 37% | -0.07R | 18R |
+
+The ICT model's +0.13R on the first 60-day test was luck: on 268 trades it is
+slightly negative. The 30-minute ORB breaks even, which after costs means no
+edge.
+
 ## Support/resistance on 1-hour bars, June 2024 - Oct 2026
 
 | strategy | trades | win | avg |

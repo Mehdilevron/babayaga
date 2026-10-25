@@ -7,12 +7,13 @@ T = datetime.time
 
 
 def prev_levels(days):
-    """{session date: (prev high, prev low)} from the previous session's bars."""
-    out, prev = {}, None
+    """{session date: (prev high, prev low)} from the previous session's bars,
+    only when that session was the last trading day (not across a data gap)."""
+    out, prev, prev_day = {}, None, None
     for d, bars in days:
-        if prev:
+        if prev and (d - prev_day).days <= 4:  # a weekend or a holiday, not a missing month
             out[d] = prev
-        prev = (max(b[2] for b in bars), min(b[3] for b in bars))
+        prev, prev_day = (max(b[2] for b in bars), min(b[3] for b in bars)), d
     return out
 
 
