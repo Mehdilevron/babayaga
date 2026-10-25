@@ -75,6 +75,23 @@ class Indicators(unittest.TestCase):
         self.assertEqual(dr.signal(0, [10], [9], [8], [75]), None)
 
 
+class Filter(unittest.TestCase):
+    def x(self, trades, won, avg_r, side="BUY"):
+        return {"side": side, "trades": trades, "won": won, "avg_r": avg_r}
+
+    def test_passes_only_with_enough_trades_wins_and_profit(self):
+        self.assertTrue(dr.strong(self.x(20, 16, 0.4)))         # 80%, 20 trades
+        self.assertFalse(dr.strong(self.x(20, 15, 0.4)))        # 75%
+        self.assertFalse(dr.strong(self.x(10, 9, 0.4)))         # too few trades
+        self.assertFalse(dr.strong(self.x(20, 17, -0.1)))       # wins but loses money
+        self.assertFalse(dr.strong(self.x(20, 17, 0.4, None)))  # no setup today
+        self.assertFalse(dr.strong(None))
+
+    def test_reason_for_hiding(self):
+        self.assertEqual(dr.filtered_out(self.x(39, 21, 0.55)), "Setup hidden: past win rate 54% (needs 80%+)")
+        self.assertEqual(dr.filtered_out(self.x(9, 9, 1.0)), "Setup hidden: only 9 past trades (needs 15+)")
+
+
 class Calendar(unittest.TestCase):
     T = datetime.datetime(2026, 10, 29, 12, 30, tzinfo=datetime.timezone.utc)
 

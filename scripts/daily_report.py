@@ -28,7 +28,8 @@ import urllib.request
 UA = "Mozilla/5.0 (compatible; daily-report/2.0)"
 LINE = "━━━━━━━━━━━━━━━━━━"
 HOLD_DAYS = 10
-MIN_TRADES = 8
+MIN_TRADES = 15   # a setup is shown only with this many past trades...
+MIN_WIN = 0.80    # ...this share of them won, and a positive average R
 TOP_N = 5
 STOCKS_N = 12
 MAX_BYTES = 3900
@@ -243,8 +244,16 @@ def analyse(symbol, long_only=False):
 
 
 def strong(x):
-    return (x and x.get("side") and x["trades"] >= MIN_TRADES
-            and x["avg_r"] is not None and x["avg_r"] > 0)
+    return bool(x and x.get("side") and x["trades"] >= MIN_TRADES
+                and x["won"] / x["trades"] >= MIN_WIN
+                and x["avg_r"] is not None and x["avg_r"] > 0)
+
+
+def filtered_out(x):
+    if x["trades"] < MIN_TRADES:
+        return "Setup hidden: only %d past trades (needs %d+)" % (x["trades"], MIN_TRADES)
+    return "Setup hidden: past win rate %d%% (needs %d%%+)" % (
+        round(100.0 * x["won"] / x["trades"]), round(100 * MIN_WIN))
 
 
 # ---------------------------------------------------------------- calendar
@@ -404,8 +413,6 @@ def setup_lines(x, dp, indent="   ", gold=False):
     t = x.get("today")
     if t and ((t[2] >= x["entry"]) if x["side"] == "BUY" else (t[3] <= x["entry"])):
         out.append(indent + "⚡ Entry already reached today (now %s)" % fmt(t[4], dp))
-    if not strong(x):
-        out.append(indent + "⚠️ Weak: this rule did not make money here")
     return out
 
 
@@ -432,8 +439,7 @@ def stocks_message(watch, news, note, rows):
     for k in range(0, len(names), 3):
         out.append(" · ".join(names[k:k + 3]))
     out.append("Showing the %d most traded. Buy-only." % len(rows))
-    buys = sorted([r for r in rows if r[1] and r[1].get("side")],
-                  key=lambda r: -(r[1]["avg_r"] if r[1]["avg_r"] is not None else -9))
+    buys = sorted([r for r in rows if strong(r[1])], key=lambda r: -r[1]["avg_r"])
     rest = [r for r in rows if r not in buys]
     if buys:
         out += ["", LINE, "🟢 BUY SETUPS (best first)"]
@@ -455,7 +461,7 @@ def stocks_message(watch, news, note, rows):
             out.append("%s %s  $%.2f  %s" % (icon, h["symbol"], x["close"], move(x["close"], x["prev"])))
             out.append("   %s · trend %s · RSI %.0f" % (
                 ", ".join(SETUP_NAMES.get(s, s) for s in h["setups"]), x["trend"], x["rsi"]))
-            out.append("   " + why_not(x, long_only=True))
+            out.append("   " + (filtered_out(x) if x["side"] else why_not(x, long_only=True)))
             if news.get(h["symbol"]):
                 out.append("   📰 " + short(news[h["symbol"]]))
     return "\n".join(out)
@@ -484,20 +490,22 @@ def calendar_section(events, cal):
 
 def forex_message(fx, week, cal):
     out = ["🟢 buy setup · 🔴 sell setup · 🟡 wait"]
-    order = sorted(fx, key=lambda r: (r[1] is None, not (r[1] and r[1].get("side")),
-                                      -(r[1]["avg_r"] or 0) if r[1] and r[1].get("avg_r") is not None else 0))
+    order = sorted(fx, key=lambda r: (r[1] is None, not strong(r[1]),
+                                      -(r[1]["avg_r"] or 0) if strong(r[1]) else 0))
     for (name, symbol, dp, tradable), x in order:
         out.append("")
         if x is None:
             out.append("⚪ %s  no data" % name)
             continue
-        icon = ICON[x["side"]] if tradable else "📊"
+        icon = (ICON[x["side"]] if strong(x) else ICON[None]) if tradable else "📊"
         out.append("%s %s  %s" % (icon, name, fmt(x["close"], dp)))
         out.append("   %s day · %s week" % (move(x["close"], x["prev"]), move(x["close"], x["week"])))
         out.append("   Trend %s · RSI %.0f" % (x["trend"], x["rsi"]))
         out.append("   20-day %s – %s" % (fmt(x["lo20"], dp), fmt(x["hi20"], dp)))
-        if tradable and x["side"]:
+        if tradable and strong(x):
             out += setup_lines(x, dp, gold=symbol == "GC=F")
+        elif tradable and x["side"]:
+            out.append("   " + filtered_out(x))
         elif tradable:
             out.append("   No setup: " + why_not(x))
     out += ["", "Gold = COMEX futures. Spot XAUUSD on TradingView is a little lower."]
@@ -506,9 +514,10 @@ def forex_message(fx, week, cal):
 
 
 def plan_message(data_day, top, soon, cal):
-    out = ["Data: %s close" % data_day.strftime("%a %d %b"), LINE, "🎯 TOP SETUPS (best first)"]
+    out = ["Data: %s close" % data_day.strftime("%a %d %b"), LINE, "🎯 TOP SETUPS (best first)",
+           "Filter: %d%%+ past wins, %d+ trades" % (round(100 * MIN_WIN), MIN_TRADES)]
     if not top:
-        out += ["", "No strong setups today.", "Waiting is also a decision."]
+        out += ["", "No setup passed the filter today.", "No trade is also a decision."]
     for n, (label, dp, x, kind) in enumerate(top, 1):
         out.append("")
         out.append("%d) %s %s %s%s" % (n, ICON[x["side"]], x["side"], label, kind))
